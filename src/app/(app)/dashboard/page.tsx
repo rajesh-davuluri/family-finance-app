@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
+import { Analytics } from "@vercel/analytics/next";
 
 type CategorySlice = { id: string; name: string; total: number };
 

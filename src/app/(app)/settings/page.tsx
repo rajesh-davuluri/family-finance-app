@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { Analytics } from "@vercel/analytics/next"
 
 export default function SettingsPage() {
   const { data: session } = useSession();

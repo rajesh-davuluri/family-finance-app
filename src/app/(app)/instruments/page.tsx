@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
+import { Analytics } from "@vercel/analytics/next";
 
 type Instrument = {
   id: string;

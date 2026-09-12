@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
+import { Analytics } from "@vercel/analytics/next";
 type Member = { id: string; name: string; email: string; role: string; mfaEnabled: boolean };
 type Household = { id: string; name: string; inviteCode: string; users: Member[] };
 
