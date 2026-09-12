@@ -1,0 +1,140 @@
+// Family Finance App — Prisma schema
+// Datasource: SQL Server (matches your existing local install / Azure SQL)
+//
+// NOTES CARRIED OVER FROM THE PREVIOUS BUILD (learned the hard way):
+// - SQL Server has no native enum support in Prisma — every "enum-like"
+//   field below is a plain String, validated in code via src/lib/enums.ts
+// - SQL Server rejects a schema with more than one cascade path to the same
+//   table — this applies to BOTH onDelete AND onUpdate independently (Prisma
+//   defaults onUpdate to Cascade even when you only set onDelete, so both
+//   must be set to NoAction explicitly wherever a second path exists, which
+//   in this schema is everywhere, so every relation below sets both).
+//   Cleanup that would otherwise have cascaded happens explicitly in
+//   src/lib/cascadeDelete.ts instead.
+// - createMany({ skipDuplicates: true }) is not supported — seed script
+//   uses per-row upserts instead.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Household {
+  id         String   @id @default(uuid())
+  name       String
+  inviteCode String   @unique @default(cuid())
+  createdAt  DateTime @default(now())
+
+  users       User[]
+  instruments PaymentInstrument[]
+  categories  TransactionCategory[]
+  transactions Transaction[]
+  recurring   RecurringTemplate[]
+}
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String
+  passwordHash String
+  role        String   @default("MEMBER") // ADMIN | MEMBER — see src/lib/enums.ts
+
+  // TOTP MFA
+  mfaEnabled        Boolean @default(false)
+  mfaSecretEncrypted String? @db.NVarChar(Max)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt   DateTime @default(now())
+
+  createdTransactions Transaction[] @relation("CreatedByUser")
+}
+
+model PaymentInstrument {
+  id          String  @id @default(uuid())
+  name        String
+  type        String  // BANK_ACCOUNT | CREDIT_CARD | CASH | OTHER — see src/lib/enums.ts
+  last4       String?
+  currency    String  @default("USD")
+  archived    Boolean @default(false)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  transactions       Transaction[]
+  recurringTemplates RecurringTemplate[]
+
+  createdAt   DateTime @default(now())
+}
+
+model TransactionCategory {
+  id        String  @id @default(uuid())
+  name      String
+  direction String  // INCOME | EXPENSE — see src/lib/enums.ts
+  isDefault Boolean @default(false)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  transactions Transaction[]
+  recurring    RecurringTemplate[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([householdId, name])
+}
+
+model Transaction {
+  id       String   @id @default(uuid())
+  amount   Decimal  @db.Decimal(12, 2)
+  currency String   @default("USD")
+  date     DateTime
+  notes    String?  @db.NVarChar(Max)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  categoryId String
+  category   TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdById String
+  createdBy   User   @relation("CreatedByUser", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  recurringTemplateId String?
+  recurringTemplate   RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, date])
+}
+
+model RecurringTemplate {
+  id        String  @id @default(uuid())
+  amount    Decimal @db.Decimal(12, 2)
+  currency  String  @default("USD")
+  notes     String? @db.NVarChar(Max)
+  frequency String  // WEEKLY | MONTHLY | YEARLY — see src/lib/enums.ts
+  nextRunAt DateTime
+  active    Boolean @default(true)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  categoryId String
+  category   TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  generatedTransactions Transaction[]
+
+  createdAt DateTime @default(now())
+}
