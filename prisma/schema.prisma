@@ -65,6 +65,15 @@ model PaymentInstrument {
   currency    String  @default("USD")
   archived    Boolean @default(false)
 
+  // Opening balance tracking: an amount plus the date it was true as of.
+  // Current balance is computed as openingBalance + every income/expense
+  // transaction logged against this instrument since openingBalanceDate --
+  // never stored, so it can't drift. Both fields are optional together;
+  // an instrument with neither set has no balance tracking (nothing to
+  // compute from).
+  openingBalance     Decimal?  @db.Decimal(12, 2)
+  openingBalanceDate DateTime?
+
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

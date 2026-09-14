@@ -7,6 +7,8 @@ import { deleteInstrumentCascade } from "@/lib/cascadeDelete";
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   archived: z.boolean().optional(),
+  openingBalance: z.number().nullable().optional(),
+  openingBalanceDate: z.string().nullable().optional(),
 });
 
 async function assertOwnership(instrumentId: string, householdId: string) {
@@ -25,8 +27,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const parsed = updateSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  const { openingBalanceDate, ...rest } = parsed.data;
 
-  const updated = await prisma.paymentInstrument.update({ where: { id }, data: parsed.data });
+  const updated = await prisma.paymentInstrument.update({
+    where: { id },
+    data: { ...rest, ...(openingBalanceDate !== undefined ? { openingBalanceDate: openingBalanceDate ? new Date(openingBalanceDate) : null } : {}) },
+  });
   return NextResponse.json(updated);
 }
 
