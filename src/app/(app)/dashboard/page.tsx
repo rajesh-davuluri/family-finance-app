@@ -12,6 +12,7 @@ type PeriodSummary = {
   net: number;
   expenseBreakdown: CategorySlice[];
   incomeBreakdown: CategorySlice[];
+  instrumentBreakdown: CategorySlice[];
 };
 
 type SummaryResponse = {
@@ -92,6 +93,13 @@ export default function DashboardPage() {
   // "Add Transaction" popup, launched from the button next to the page title.
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Card usage chart: which period it's showing, and drill-down state for
+  // clicking a specific card's bar.
+  const [cardUsagePeriod, setCardUsagePeriod] = useState<Panel>("monthly");
+  const [selectedInstrument, setSelectedInstrument] = useState<CategorySlice | null>(null);
+  const [instrumentTxns, setInstrumentTxns] = useState<TransactionDetail[] | null>(null);
+  const [instrumentTxnsLoading, setInstrumentTxnsLoading] = useState(false);
+
   function loadSummary() {
     setLoading(true);
     fetch(`/api/dashboard/summary?month=${month}&year=${year}`)
@@ -109,6 +117,8 @@ export default function DashboardPage() {
     setExpandedKind(null);
     setSelectedCategory(null);
     setCategoryTxns(null);
+    setSelectedInstrument(null);
+    setInstrumentTxns(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
 
@@ -121,6 +131,8 @@ export default function DashboardPage() {
     setExpandedKind(null);
     setSelectedCategory(null);
     setCategoryTxns(null);
+    setSelectedInstrument(null);
+    setInstrumentTxns(null);
   }
 
   function openPanel(panel: Panel, kind: Kind) {
@@ -145,6 +157,22 @@ export default function DashboardPage() {
     const txns = await res.json();
     setCategoryTxns(txns);
     setTxnsLoading(false);
+  }
+
+  async function handleInstrumentClick(instrument: CategorySlice) {
+    if (!data) return;
+    if (selectedInstrument?.id === instrument.id) {
+      setSelectedInstrument(null);
+      setInstrumentTxns(null);
+      return;
+    }
+    setSelectedInstrument(instrument);
+    setInstrumentTxnsLoading(true);
+    const range = cardUsagePeriod === "monthly" ? data.monthRange : data.ytdRange;
+    const res = await fetch(`/api/transactions?instrumentId=${instrument.id}&from=${range.from}&to=${range.to}&limit=500`);
+    const txns = await res.json();
+    setInstrumentTxns(txns);
+    setInstrumentTxnsLoading(false);
   }
 
   const years = Array.from({ length: 6 }, (_, i) => now.getFullYear() - i);
@@ -243,6 +271,100 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Card usage -- always visible, its own Monthly/YTD toggle */}
+      <div className="rounded-lg border bg-white p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-gray-700">
+            Card usage —{" "}
+            {cardUsagePeriod === "monthly" ? `${MONTH_NAMES[month - 1]} ${year}` : year === now.getFullYear() ? "year to date" : `full year ${year}`}
+          </h2>
+          <div className="flex rounded-md border p-1 text-xs">
+            <button
+              onClick={() => {
+                setCardUsagePeriod("monthly");
+                setSelectedInstrument(null);
+                setInstrumentTxns(null);
+              }}
+              className={`rounded px-2 py-1 ${cardUsagePeriod === "monthly" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => {
+                setCardUsagePeriod("ytd");
+                setSelectedInstrument(null);
+                setInstrumentTxns(null);
+              }}
+              className={`rounded px-2 py-1 ${cardUsagePeriod === "ytd" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              YTD
+            </button>
+          </div>
+        </div>
+        {loading || !data ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : (
+          <CategoryBarChart
+            data={data[cardUsagePeriod].instrumentBreakdown}
+            tone="expense"
+            selectedCategoryId={selectedInstrument?.id}
+            onCategoryClick={handleInstrumentClick}
+          />
+        )}
+      </div>
+
+      {/* Card usage transaction-level detail -- only rendered once a card bar is clicked */}
+      {selectedInstrument && (
+        <div className="rounded-lg border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-gray-700">
+              {selectedInstrument.name} transactions — ${selectedInstrument.total.toFixed(2)} total
+            </h2>
+            <button
+              onClick={() => {
+                setSelectedInstrument(null);
+                setInstrumentTxns(null);
+              }}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Close
+            </button>
+          </div>
+
+          {instrumentTxnsLoading || !instrumentTxns ? (
+            <p className="text-sm text-gray-400">Loading...</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-gray-500">
+                  <th className="py-2">Date</th>
+                  <th className="py-2">Notes</th>
+                  <th className="py-2 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instrumentTxns.map((t) => (
+                  <tr key={t.id} className="border-b last:border-0">
+                    <td className="py-2">{new Date(t.date).toLocaleDateString()}</td>
+                    <td className="py-2 text-gray-500">{t.notes || "—"}</td>
+                    <td className="py-2 text-right font-medium text-red-600">
+                      {t.currency} {Number(t.amount).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                {instrumentTxns.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="py-6 text-center text-gray-400">
+                      No transactions found for this card in this period.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* Category breakdown chart -- only rendered once Income or Expenses is clicked */}
       {expandedPanel && expandedKind && data && breakdownData && (

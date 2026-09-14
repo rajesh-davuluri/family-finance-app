@@ -3,23 +3,38 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
 
-// Powers the redesigned dashboard: a month/year-selectable monthly summary,
-// a year-to-date summary for the same year, and an expense-by-category
-// breakdown for whichever period the person clicks into (monthly or YTD).
-// Both periods are computed together in one call since they're always shown
-// side by side.
+// Powers the dashboard: a month/year-selectable monthly summary, a
+// year-to-date summary for the same year, an expense/income-by-category
+// breakdown for whichever period the person clicks into, and a spend-by-card
+// (instrument) breakdown shown directly on the monthly grid. All computed
+// together in one call since they're always shown side by side.
 
-function summarize(transactions: { amount: any; currency: string; category: { id: string; direction: string; name: string } }[]) {
+type Txn = {
+  amount: any;
+  currency: string;
+  category: { id: string; direction: string; name: string };
+  instrument: { id: string; name: string };
+};
+
+function summarize(transactions: Txn[]) {
   let income = 0;
   let expense = 0;
   const expenseTotals = new Map<string, { name: string; total: number }>();
   const incomeTotals = new Map<string, { name: string; total: number }>();
+  const instrumentTotals = new Map<string, { name: string; total: number }>();
 
   for (const t of transactions) {
     const usd = toApproxUsd(Number(t.amount), t.currency);
     const bucket = t.category.direction === "INCOME" ? incomeTotals : expenseTotals;
-    if (t.category.direction === "INCOME") income += usd;
-    else expense += usd;
+    if (t.category.direction === "INCOME") {
+      income += usd;
+    } else {
+      expense += usd;
+      // Card usage is spending only -- income isn't "used on a card" in any
+      // meaningful sense, so instrument totals only tally expense transactions.
+      const existingInst = instrumentTotals.get(t.instrument.id);
+      instrumentTotals.set(t.instrument.id, { name: t.instrument.name, total: (existingInst?.total ?? 0) + usd });
+    }
 
     const existing = bucket.get(t.category.id);
     bucket.set(t.category.id, { name: t.category.name, total: (existing?.total ?? 0) + usd });
@@ -36,6 +51,7 @@ function summarize(transactions: { amount: any; currency: string; category: { id
     net: Math.round((income - expense) * 100) / 100,
     expenseBreakdown: toSortedArray(expenseTotals),
     incomeBreakdown: toSortedArray(incomeTotals),
+    instrumentBreakdown: toSortedArray(instrumentTotals),
   };
 }
 
@@ -57,11 +73,11 @@ export async function GET(req: Request) {
   const [monthlyTxns, ytdTxns] = await Promise.all([
     prisma.transaction.findMany({
       where: { householdId: user.householdId, date: { gte: monthStart, lt: monthEnd } },
-      include: { category: true },
+      include: { category: true, instrument: true },
     }),
     prisma.transaction.findMany({
       where: { householdId: user.householdId, date: { gte: yearStart, lt: yearEnd } },
-      include: { category: true },
+      include: { category: true, instrument: true },
     }),
   ]);
 

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
-import { Analytics } from "@vercel/analytics/next";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -23,6 +22,7 @@ export default function TransactionsPage() {
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"ALL" | "INCOME" | "EXPENSE">("ALL");
 
   const [form, setForm] = useState({
     amount: "",
@@ -90,6 +90,9 @@ export default function TransactionsPage() {
   if (loading) return <p className="text-sm text-gray-400">Loading...</p>;
 
   const noSetupYet = categories.length === 0 || instruments.length === 0;
+
+  const filteredTransactions = transactions.filter((t) => filter === "ALL" || t.category.direction === filter);
+  const filteredTotal = filteredTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
 
   return (
     <div className="space-y-6">
@@ -180,6 +183,32 @@ export default function TransactionsPage() {
       </form>
 
       <div className="rounded-lg border bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
+          <div className="flex rounded-md border p-1 text-xs">
+            <button
+              onClick={() => setFilter("ALL")}
+              className={`rounded px-3 py-1 ${filter === "ALL" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setFilter("INCOME")}
+              className={`rounded px-3 py-1 ${filter === "INCOME" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              Income
+            </button>
+            <button
+              onClick={() => setFilter("EXPENSE")}
+              className={`rounded px-3 py-1 ${filter === "EXPENSE" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              Expense
+            </button>
+          </div>
+          <p className="text-sm text-gray-500">
+            {filteredTransactions.length} transaction{filteredTransactions.length === 1 ? "" : "s"} · Total: $
+            {filteredTotal.toFixed(2)}
+          </p>
+        </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-gray-500">
@@ -193,7 +222,7 @@ export default function TransactionsPage() {
             </tr>
           </thead>
           <tbody>
-            {transactions.map((t) => (
+            {filteredTransactions.map((t) => (
               <tr key={t.id} className="border-b last:border-0">
                 <td className="p-3">{new Date(t.date).toLocaleDateString()}</td>
                 <td className="p-3">{t.category.name}</td>
@@ -215,10 +244,10 @@ export default function TransactionsPage() {
                 </td>
               </tr>
             ))}
-            {transactions.length === 0 && (
+            {filteredTransactions.length === 0 && (
               <tr>
                 <td colSpan={7} className="p-6 text-center text-gray-400">
-                  No transactions yet.
+                  {transactions.length === 0 ? "No transactions yet." : `No ${filter.toLowerCase()} transactions in range.`}
                 </td>
               </tr>
             )}
