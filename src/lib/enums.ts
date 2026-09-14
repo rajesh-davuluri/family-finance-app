@@ -20,3 +20,12 @@ export type RecurrenceFrequency = z.infer<typeof RecurrenceFrequency>;
 export const CURRENCIES = ["USD", "INR", "EUR", "GBP"] as const;
 export const Currency = z.enum(CURRENCIES);
 export type Currency = z.infer<typeof Currency>;
+
+export const DebtCategory = z.enum(["CREDIT_CARD", "AUTO_LOAN", "PERSONAL_LOAN", "MEDICAL", "OTHER"]);
+export type DebtCategory = z.infer<typeof DebtCategory>;
+
+export const DebtStatus = z.enum(["ACTIVE", "PAID_OFF", "CLOSED"]);
+export type DebtStatus = z.infer<typeof DebtStatus>;
+
+export const InstallmentFrequency = z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY"]);
+export type InstallmentFrequency = z.infer<typeof InstallmentFrequency>;

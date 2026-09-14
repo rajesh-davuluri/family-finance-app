@@ -9,12 +9,21 @@ import { prisma } from "@/lib/prisma";
 
 export async function deleteHouseholdCascade(householdId: string) {
   await prisma.$transaction([
+    prisma.debtPayment.deleteMany({ where: { debt: { householdId } } }),
+    prisma.debt.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
     prisma.paymentInstrument.deleteMany({ where: { householdId } }),
     prisma.user.deleteMany({ where: { householdId } }),
     prisma.household.delete({ where: { id: householdId } }),
+  ]);
+}
+
+export async function deleteDebtCascade(debtId: string) {
+  await prisma.$transaction([
+    prisma.debtPayment.deleteMany({ where: { debtId } }),
+    prisma.debt.delete({ where: { id: debtId } }),
   ]);
 }
 

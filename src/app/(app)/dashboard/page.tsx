@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
-import { Analytics } from "@vercel/analytics/next";
+import AddTransactionModal from "@/components/AddTransactionModal";
 
 type CategorySlice = { id: string; name: string; total: number };
 
@@ -89,7 +89,10 @@ export default function DashboardPage() {
   const [categoryTxns, setCategoryTxns] = useState<TransactionDetail[] | null>(null);
   const [txnsLoading, setTxnsLoading] = useState(false);
 
-  useEffect(() => {
+  // "Add Transaction" popup, launched from the button next to the page title.
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  function loadSummary() {
     setLoading(true);
     fetch(`/api/dashboard/summary?month=${month}&year=${year}`)
       .then((r) => r.json())
@@ -97,12 +100,28 @@ export default function DashboardPage() {
         setData(d);
         setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    loadSummary();
     // Changing the period invalidates any open breakdown/drill-down.
     setExpandedPanel(null);
     setExpandedKind(null);
     setSelectedCategory(null);
     setCategoryTxns(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
+
+  function handleTransactionAdded() {
+    setShowAddModal(false);
+    loadSummary();
+    // A new transaction can change whatever breakdown/drill-down was open,
+    // so close those rather than show stale figures.
+    setExpandedPanel(null);
+    setExpandedKind(null);
+    setSelectedCategory(null);
+    setCategoryTxns(null);
+  }
 
   function openPanel(panel: Panel, kind: Kind) {
     const closing = expandedPanel === panel && expandedKind === kind;
@@ -139,7 +158,17 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Dashboard</h1>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          Add Transaction
+        </button>
+      </div>
+
+      <AddTransactionModal open={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={handleTransactionAdded} />
 
       {/* Monthly grid */}
       <div className="rounded-lg border bg-white p-4">

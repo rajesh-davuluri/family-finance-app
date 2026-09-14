@@ -18,3 +18,10 @@ export function toApproxUsd(amount: number, currency: string): number {
   const rate = APPROX_RATES_TO_USD[currency] ?? 1;
   return amount * rate;
 }
+
+// Used to pre-fill the "conversion rate" field when adding a debt in a
+// non-USD currency -- a reasonable starting point the person can overwrite
+// with the actual rate they got at the time.
+export function getDefaultRate(currency: string): number {
+  return APPROX_RATES_TO_USD[currency] ?? 1;
+}
