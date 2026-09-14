@@ -6,14 +6,28 @@ import { CURRENCIES } from "@/lib/enums";
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
 
+export type EditableTransaction = {
+  id: string;
+  amount: string | number;
+  currency: string;
+  date: string;
+  notes: string | null;
+  categoryId: string;
+  instrumentId: string;
+};
+
 export default function AddTransactionModal({
   open,
   onClose,
   onSuccess,
+  editingTransaction,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  // When provided, the modal edits this transaction (PATCH) instead of
+  // creating a new one (POST). Everything else about the form is identical.
+  editingTransaction?: EditableTransaction | null;
 }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -29,8 +43,12 @@ export default function AddTransactionModal({
     instrumentId: "",
   });
 
+  const isEditing = !!editingTransaction;
+
   // Load fresh options each time the modal opens, in case a category or
-  // instrument was added/archived since the last time it was open.
+  // instrument was added/archived since the last time it was open. Prefills
+  // from editingTransaction when editing, otherwise defaults to sensible
+  // first options for a new transaction.
   useEffect(() => {
     if (!open) return;
     setError(null);
@@ -40,14 +58,26 @@ export default function AddTransactionModal({
       const insts = await instRes.json();
       setCategories(cats);
       setInstruments(insts);
-      setForm((f) => ({
-        ...f,
-        categoryId: cats[0]?.id || "",
-        instrumentId: insts.find((i: Instrument) => !i.archived)?.id || "",
-      }));
+      if (editingTransaction) {
+        setForm({
+          amount: String(editingTransaction.amount),
+          currency: editingTransaction.currency,
+          date: editingTransaction.date.slice(0, 10),
+          notes: editingTransaction.notes ?? "",
+          categoryId: editingTransaction.categoryId,
+          instrumentId: editingTransaction.instrumentId,
+        });
+      } else {
+        setForm((f) => ({
+          ...f,
+          categoryId: cats[0]?.id || "",
+          instrumentId: insts.find((i: Instrument) => !i.archived)?.id || "",
+        }));
+      }
       setLoading(false);
     });
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editingTransaction?.id]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,18 +87,18 @@ export default function AddTransactionModal({
       return;
     }
     setSubmitting(true);
-    const res = await fetch("/api/transactions", {
-      method: "POST",
+    const res = await fetch(isEditing ? `/api/transactions/${editingTransaction!.id}` : "/api/transactions", {
+      method: isEditing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
     });
     setSubmitting(false);
     if (!res.ok) {
       const body = await res.json();
-      setError(typeof body.error === "string" ? body.error : "Couldn't save that transaction.");
+      setError(typeof body.error === "string" ? body.error : `Couldn't ${isEditing ? "save" : "add"} that transaction.`);
       return;
     }
-    setForm((f) => ({ ...f, amount: "", notes: "" }));
+    if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
     onSuccess();
   }
 
@@ -80,7 +110,7 @@ export default function AddTransactionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Add Transaction</h2>
+          <h2 className="text-lg font-semibold">{isEditing ? "Edit Transaction" : "Add Transaction"}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
             ✕
           </button>
@@ -135,10 +165,11 @@ export default function AddTransactionModal({
                 className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
               >
                 {instruments
-                  .filter((i) => !i.archived)
+                  .filter((i) => !i.archived || i.id === editingTransaction?.instrumentId)
                   .map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.name}
+                      {i.archived ? " (archived)" : ""}
                     </option>
                   ))}
               </select>
@@ -170,7 +201,7 @@ export default function AddTransactionModal({
                   disabled={submitting || noSetupYet}
                   className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
                 >
-                  {submitting ? "Adding..." : "Add Transaction"}
+                  {submitting ? "Saving..." : isEditing ? "Save Changes" : "Add Transaction"}
                 </button>
               </div>
             </form>
