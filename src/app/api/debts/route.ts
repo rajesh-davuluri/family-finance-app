@@ -29,11 +29,21 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  const withBalance = debts.map((d) => ({
-    ...d,
-    balance: computeBalance(Number(d.originalPrincipal), d.payments.map((p) => ({ amount: Number(p.amount) }))),
-    totalPaid: d.payments.reduce((sum, p) => sum + Number(p.amount), 0),
-  }));
+  const withBalance = debts.map((d) => {
+    const debtInfo = { currency: d.currency, conversionRateToUsd: d.conversionRateToUsd ? Number(d.conversionRateToUsd) : null };
+    const balance = computeBalance(
+      Number(d.originalPrincipal),
+      d.payments.map((p) => ({ amount: Number(p.amount), currency: p.currency })),
+      debtInfo
+    );
+    return {
+      ...d,
+      balance,
+      // totalPaid is in the debt's own currency -- derived from balance
+      // rather than re-summed, since payments may be in mixed currencies.
+      totalPaid: Math.round((Number(d.originalPrincipal) - balance) * 100) / 100,
+    };
+  });
 
   return NextResponse.json(withBalance);
 }

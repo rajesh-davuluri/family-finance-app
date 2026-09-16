@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { Currency } from "@/lib/enums";
+import { computeBalance } from "@/lib/debtCalculations";
 
 const createSchema = z.object({
   amount: z.number().positive(),
+  currency: Currency,
   paymentDate: z.string(),
   note: z.string().optional(),
 });
@@ -41,17 +44,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const payment = await prisma.debtPayment.create({
     data: {
       amount: parsed.data.amount,
+      currency: parsed.data.currency,
       paymentDate: new Date(parsed.data.paymentDate),
       note: parsed.data.note,
       debtId: id,
     },
   });
 
-  // Auto-mark as paid off once payments reach or exceed the principal --
-  // saves a manual status update for the common case.
+  // Auto-mark as paid off once payments (converted into the debt's own
+  // currency, since they may be mixed USD/INR/etc.) reach or exceed the
+  // principal -- saves a manual status update for the common case.
   const allPayments = await prisma.debtPayment.findMany({ where: { debtId: id } });
-  const totalPaid = allPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-  if (totalPaid >= Number(debt.originalPrincipal) && debt.status === "ACTIVE") {
+  const debtInfo = { currency: debt.currency, conversionRateToUsd: debt.conversionRateToUsd ? Number(debt.conversionRateToUsd) : null };
+  const balance = computeBalance(
+    Number(debt.originalPrincipal),
+    allPayments.map((p) => ({ amount: Number(p.amount), currency: p.currency })),
+    debtInfo
+  );
+  if (balance <= 0 && debt.status === "ACTIVE") {
     await prisma.debt.update({ where: { id }, data: { status: "PAID_OFF" } });
   }
 

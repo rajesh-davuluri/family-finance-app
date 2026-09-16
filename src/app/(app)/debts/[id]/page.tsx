@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { debtToApproxUsd } from "@/lib/debtCalculations";
+import { debtToApproxUsd, convertToDebtCurrency } from "@/lib/debtCalculations";
+import { CURRENCIES } from "@/lib/enums";
 
-type Payment = { id: string; amount: string; paymentDate: string; note: string | null };
+type Payment = { id: string; amount: string; currency: string; paymentDate: string; note: string | null };
 type DebtDetail = {
   id: string;
   name: string;
@@ -38,7 +39,7 @@ export default function DebtDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ amount: "", paymentDate: new Date().toISOString().slice(0, 10), note: "" });
+  const [form, setForm] = useState({ amount: "", currency: "USD", paymentDate: new Date().toISOString().slice(0, 10), note: "" });
   const [submitting, setSubmitting] = useState(false);
 
   const [editingRate, setEditingRate] = useState(false);
@@ -47,7 +48,14 @@ export default function DebtDetailPage() {
   async function load() {
     setLoading(true);
     const res = await fetch(`/api/debts/${id}`);
-    if (res.ok) setDebt(await res.json());
+    if (res.ok) {
+      const d = await res.json();
+      setDebt(d);
+      // Default the payment form's currency to the debt's own currency the
+      // first time it loads, so the common case (paying in the same
+      // currency the debt was taken in) needs no extra click.
+      setForm((f) => (f.amount === "" ? { ...f, currency: d.currency } : f));
+    }
     setLoading(false);
   }
 
@@ -63,7 +71,12 @@ export default function DebtDetailPage() {
     const res = await fetch(`/api/debts/${id}/payments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount: parseFloat(form.amount), paymentDate: form.paymentDate, note: form.note || undefined }),
+      body: JSON.stringify({
+        amount: parseFloat(form.amount),
+        currency: form.currency,
+        paymentDate: form.paymentDate,
+        note: form.note || undefined,
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -71,7 +84,7 @@ export default function DebtDetailPage() {
       setError(typeof body.error === "string" ? body.error : "Couldn't log that payment.");
       return;
     }
-    setForm({ amount: "", paymentDate: new Date().toISOString().slice(0, 10), note: "" });
+    setForm((f) => ({ ...f, amount: "", note: "" }));
     load();
   }
 
@@ -115,6 +128,7 @@ export default function DebtDetailPage() {
   const isForeign = debt.currency !== "USD";
   const rate = debt.conversionRateToUsd ? Number(debt.conversionRateToUsd) : null;
   const approxUsd = isForeign ? debtToApproxUsd(debt.balance, debt.currency, rate) : null;
+  const debtInfo = { currency: debt.currency, conversionRateToUsd: rate };
 
   return (
     <div className="space-y-6">
@@ -200,17 +214,29 @@ export default function DebtDetailPage() {
       </div>
 
       {debt.status === "ACTIVE" && (
-        <form onSubmit={handleLogPayment} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-4">
+        <form onSubmit={handleLogPayment} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-5">
           <input
             type="number"
             step="0.01"
             min="0.01"
             required
-            placeholder={`Payment amount (${debt.currency})`}
+            placeholder="Payment amount"
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
             className="rounded-md border px-3 py-2 text-sm"
           />
+          <select
+            value={form.currency}
+            onChange={(e) => setForm({ ...form, currency: e.target.value })}
+            className="rounded-md border px-3 py-2 text-sm"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+                {c === debt.currency ? " (debt's currency)" : ""}
+              </option>
+            ))}
+          </select>
           <input
             type="date"
             required
@@ -231,7 +257,13 @@ export default function DebtDetailPage() {
           >
             {submitting ? "Logging..." : "Log payment"}
           </button>
-          {error && <p className="text-sm text-red-600 sm:col-span-4">{error}</p>}
+          {error && <p className="text-sm text-red-600 sm:col-span-5">{error}</p>}
+          {form.currency !== debt.currency && (
+            <p className="text-xs text-gray-400 sm:col-span-5">
+              You're paying in {form.currency}, this debt is tracked in {debt.currency} — it'll be converted automatically using{" "}
+              {rate ? "this debt's own rate" : "the app's default rate"} when calculating the balance.
+            </p>
+          )}
         </form>
       )}
 
@@ -246,20 +278,29 @@ export default function DebtDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {debt.payments.map((p) => (
-              <tr key={p.id} className="border-b last:border-0">
-                <td className="p-3">{new Date(p.paymentDate).toLocaleDateString()}</td>
-                <td className="p-3 text-gray-500">{p.note || "—"}</td>
-                <td className="p-3 text-right font-medium text-green-600">
-                  {debt.currency} {Number(p.amount).toFixed(2)}
-                </td>
-                <td className="p-3 text-right">
-                  <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:underline">
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {debt.payments.map((p) => {
+              const paymentIsForeign = p.currency !== debt.currency;
+              const converted = paymentIsForeign ? convertToDebtCurrency(Number(p.amount), p.currency, debtInfo) : null;
+              return (
+                <tr key={p.id} className="border-b last:border-0">
+                  <td className="p-3">{new Date(p.paymentDate).toLocaleDateString()}</td>
+                  <td className="p-3 text-gray-500">{p.note || "—"}</td>
+                  <td className="p-3 text-right font-medium text-green-600">
+                    {p.currency} {Number(p.amount).toFixed(2)}
+                    {converted !== null && (
+                      <span className="ml-1 text-xs font-normal text-gray-400">
+                        (≈ {debt.currency} {converted.toFixed(2)})
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    <button onClick={() => handleDeletePayment(p.id)} className="text-xs text-red-500 hover:underline">
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
             {debt.payments.length === 0 && (
               <tr>
                 <td colSpan={4} className="p-6 text-center text-gray-400">

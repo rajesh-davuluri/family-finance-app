@@ -33,7 +33,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const debt = await getOwnedDebt(id, user.householdId);
   if (!debt) return NextResponse.json({ error: "Not found." }, { status: 404 });
 
-  const balance = computeBalance(Number(debt.originalPrincipal), debt.payments.map((p) => ({ amount: Number(p.amount) })));
+  const balance = computeBalance(
+    Number(debt.originalPrincipal),
+    debt.payments.map((p) => ({ amount: Number(p.amount), currency: p.currency })),
+    { currency: debt.currency, conversionRateToUsd: debt.conversionRateToUsd ? Number(debt.conversionRateToUsd) : null }
+  );
   return NextResponse.json({ ...debt, balance });
 }
 

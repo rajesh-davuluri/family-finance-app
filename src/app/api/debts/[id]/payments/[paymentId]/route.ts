@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { computeBalance } from "@/lib/debtCalculations";
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; paymentId: string }> }) {
   const { id, paymentId } = await params;
@@ -15,12 +16,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   await prisma.debtPayment.delete({ where: { id: paymentId } });
 
-  // If deleting this payment drops the total below the principal, a
+  // If deleting this payment drops the balance back above zero, a
   // previously auto-marked "paid off" debt should go back to active.
+  // Payments may be mixed USD/INR/etc., so this converts each into the
+  // debt's own currency before comparing, same as everywhere else.
   if (debt.status === "PAID_OFF") {
     const remaining = await prisma.debtPayment.findMany({ where: { debtId: id } });
-    const totalPaid = remaining.reduce((sum, p) => sum + Number(p.amount), 0);
-    if (totalPaid < Number(debt.originalPrincipal)) {
+    const debtInfo = { currency: debt.currency, conversionRateToUsd: debt.conversionRateToUsd ? Number(debt.conversionRateToUsd) : null };
+    const balance = computeBalance(
+      Number(debt.originalPrincipal),
+      remaining.map((p) => ({ amount: Number(p.amount), currency: p.currency })),
+      debtInfo
+    );
+    if (balance > 0) {
       await prisma.debt.update({ where: { id }, data: { status: "ACTIVE" } });
     }
   }

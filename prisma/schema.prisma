@@ -176,14 +176,15 @@ model Debt {
   createdAt DateTime @default(now())
 
   // Current balance is intentionally NOT a stored column — it's computed as
-  // originalPrincipal - SUM(payments.amount) at read time (see
-  // src/lib/debtCalculations.ts), so it can never drift out of sync if a
-  // payment gets edited or deleted later.
+  // originalPrincipal - SUM(payments converted to this debt's currency) at
+  // read time (see src/lib/debtCalculations.ts), so it can never drift out
+  // of sync if a payment gets edited or deleted later.
 }
 
 model DebtPayment {
   id          String   @id @default(uuid())
   amount      Decimal  @db.Decimal(12, 2)
+  currency    String   @default("USD") // USD | INR | EUR | GBP — independent of the debt's own currency; a debt can be paid down in either.
   paymentDate DateTime
   note        String?  @db.NVarChar(Max)
 
