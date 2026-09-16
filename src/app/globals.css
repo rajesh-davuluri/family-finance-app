@@ -3,5 +3,17 @@
 @tailwind utilities;
 
 body {
-  @apply bg-gray-50 text-gray-900;
+  @apply bg-paper text-ink-900 font-sans;
+}
+
+h1,
+h2,
+h3 {
+  @apply font-display;
+}
+
+/* Tabular figures wherever money is displayed, so digits align in a column
+   instead of the ragged look proportional numerals give a table. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
 }

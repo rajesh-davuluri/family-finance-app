@@ -146,7 +146,7 @@ export default function DebtsPage() {
 
       <div className="rounded-lg border bg-white p-4">
         <p className="text-sm text-gray-500">Total owed (active debts, approx. USD)</p>
-        <p className="mt-1 text-2xl font-semibold text-red-600">${totalOwedUsd.toFixed(2)}</p>
+        <p className="mt-1 font-display text-2xl font-semibold text-expense-600">${totalOwedUsd.toFixed(2)}</p>
         {debts.some((d) => d.currency !== "USD") && (
           <p className="mt-1 text-xs text-gray-400">
             Converted using each debt's recorded rate where set, otherwise an approximate rate — each debt below still shows its real balance in its own currency.
@@ -293,7 +293,7 @@ export default function DebtsPage() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className={`text-lg font-semibold ${d.status === "PAID_OFF" ? "text-green-600" : "text-red-600"}`}>
+                  <p className={`text-lg font-semibold ${d.status === "PAID_OFF" ? "text-income-600" : "text-expense-600"}`}>
                     {d.currency} {d.balance.toFixed(2)}
                   </p>
                   {d.currency !== "USD" && <p className="text-xs text-gray-400">≈ ${usdOf(d).toFixed(2)}</p>}
@@ -301,7 +301,7 @@ export default function DebtsPage() {
               </div>
               <div className="mt-2 h-2 w-full rounded-full bg-gray-100">
                 <div
-                  className={`h-2 rounded-full ${d.status === "PAID_OFF" ? "bg-green-500" : "bg-brand-500"}`}
+                  className={`h-2 rounded-full ${d.status === "PAID_OFF" ? "bg-income-500" : "bg-brand-500"}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>

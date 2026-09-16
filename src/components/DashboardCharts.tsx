@@ -5,8 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 type CategorySlice = { id: string; name: string; total: number };
 
 const COLORS = {
-  expense: { base: "#dc2626", selected: "#991b1b" },
-  income: { base: "#16a34a", selected: "#166534" },
+  expense: { base: "#A0463A", selected: "#8A3A2F" },
+  income: { base: "#4B7B5A", selected: "#3D6549" },
 };
 
 export function CategoryBarChart({

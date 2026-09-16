@@ -33,6 +33,8 @@ type TransactionDetail = {
   instrument: { name: string };
 };
 
+type BudgetSummary = { id: string; monthlyLimit: string; spent: number; category: { id: string; name: string } };
+
 type Panel = "monthly" | "ytd";
 type Kind = "income" | "expense";
 
@@ -55,7 +57,7 @@ function SummaryCard({
   onClick?: () => void;
 }) {
   const colorClass =
-    tone === "income" ? "text-green-600" : tone === "expense" ? "text-red-600" : value >= 0 ? "text-green-600" : "text-red-600";
+    tone === "income" ? "text-income-600" : tone === "expense" ? "text-expense-600" : value >= 0 ? "text-income-600" : "text-expense-600";
 
   return (
     <button
@@ -68,7 +70,7 @@ function SummaryCard({
         {label}
         {onClick && <span className="ml-1 text-xs text-brand-600">(click for breakdown)</span>}
       </p>
-      <p className={`mt-1 text-2xl font-semibold ${colorClass}`}>${value.toFixed(2)}</p>
+      <p className={`mt-1 font-display text-2xl font-semibold ${colorClass}`}>${value.toFixed(2)}</p>
     </button>
   );
 }
@@ -92,6 +94,10 @@ export default function DashboardPage() {
 
   // "Add Transaction" popup, launched from the button next to the page title.
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Compact budget status widget -- independent of the month/year selector
+  // above, since a budget is inherently a "this calendar month" concept.
+  const [budgets, setBudgets] = useState<BudgetSummary[] | null>(null);
 
   // Card usage chart: which period it's showing, and drill-down state for
   // clicking a specific card's bar.
@@ -122,9 +128,20 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, year]);
 
+  function loadBudgets() {
+    fetch("/api/budgets")
+      .then((r) => r.json())
+      .then(setBudgets);
+  }
+
+  useEffect(() => {
+    loadBudgets();
+  }, []);
+
   function handleTransactionAdded() {
     setShowAddModal(false);
     loadSummary();
+    loadBudgets();
     // A new transaction can change whatever breakdown/drill-down was open,
     // so close those rather than show stale figures.
     setExpandedPanel(null);
@@ -272,6 +289,39 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Budget status -- compact, always-visible, links out to the full page */}
+      {budgets && budgets.length > 0 && (
+        <div className="rounded-lg border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-gray-700">Budgets this month</h2>
+            <a href="/budgets" className="text-xs text-brand-600 hover:underline">
+              Manage budgets
+            </a>
+          </div>
+          <div className="space-y-3">
+            {budgets.map((b) => {
+              const limit = Number(b.monthlyLimit);
+              const pct = Math.min(100, Math.round((b.spent / limit) * 100));
+              const over = b.spent > limit;
+              const barColor = over ? "bg-expense-600" : pct >= 80 ? "bg-brand-500" : "bg-income-500";
+              return (
+                <div key={b.id}>
+                  <div className="flex items-center justify-between text-sm">
+                    <span>{b.category.name}</span>
+                    <span className={over ? "text-expense-600" : "text-gray-500"}>
+                      ${b.spent.toFixed(2)} / ${limit.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100">
+                    <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Card usage -- always visible, its own Monthly/YTD toggle */}
       <div className="rounded-lg border bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
@@ -348,7 +398,7 @@ export default function DashboardPage() {
                   <tr key={t.id} className="border-b last:border-0">
                     <td className="py-2">{new Date(t.date).toLocaleDateString()}</td>
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
-                    <td className="py-2 text-right font-medium text-red-600">
+                    <td className="py-2 text-right font-medium text-expense-600">
                       {t.currency} {Number(t.amount).toFixed(2)}
                     </td>
                   </tr>
@@ -431,7 +481,7 @@ export default function DashboardPage() {
                     <td className="py-2">{new Date(t.date).toLocaleDateString()}</td>
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
                     <td className="py-2">{t.instrument.name}</td>
-                    <td className={`py-2 text-right font-medium ${expandedKind === "income" ? "text-green-600" : "text-red-600"}`}>
+                    <td className={`py-2 text-right font-medium ${expandedKind === "income" ? "text-income-600" : "text-expense-600"}`}>
                       {t.currency} {Number(t.amount).toFixed(2)}
                     </td>
                   </tr>

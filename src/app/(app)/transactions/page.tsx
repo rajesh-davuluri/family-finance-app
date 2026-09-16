@@ -342,7 +342,7 @@ export default function TransactionsPage() {
                   <td className="p-3 text-gray-500">{t.createdBy?.name ?? "—"}</td>
                   <td
                     className={`p-3 text-right font-medium ${
-                      t.category.direction === "INCOME" ? "text-green-600" : "text-red-600"
+                      t.category.direction === "INCOME" ? "text-income-600" : "text-expense-600"
                     }`}
                   >
                     {t.category.direction === "INCOME" ? "+" : "-"}

@@ -11,6 +11,7 @@ export async function deleteHouseholdCascade(householdId: string) {
   await prisma.$transaction([
     prisma.debtPayment.deleteMany({ where: { debt: { householdId } } }),
     prisma.debt.deleteMany({ where: { householdId } }),
+    prisma.budget.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
@@ -51,6 +52,7 @@ export async function deleteCategoryCascade(categoryId: string, reassignToCatego
     await prisma.$transaction([
       prisma.transaction.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
       prisma.recurringTemplate.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
+      prisma.budget.deleteMany({ where: { categoryId } }),
       prisma.transactionCategory.delete({ where: { id: categoryId } }),
     ]);
     return;
@@ -61,6 +63,7 @@ export async function deleteCategoryCascade(categoryId: string, reassignToCatego
   }
   await prisma.$transaction([
     prisma.recurringTemplate.deleteMany({ where: { categoryId } }),
+    prisma.budget.deleteMany({ where: { categoryId } }),
     prisma.transactionCategory.delete({ where: { id: categoryId } }),
   ]);
 }

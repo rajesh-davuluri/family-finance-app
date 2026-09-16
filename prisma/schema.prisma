@@ -35,6 +35,7 @@ model Household {
   transactions Transaction[]
   recurring   RecurringTemplate[]
   debts       Debt[]
+  budgets     Budget[]
 }
 
 model User {
@@ -94,6 +95,7 @@ model TransactionCategory {
 
   transactions Transaction[]
   recurring    RecurringTemplate[]
+  budgets      Budget[]
 
   createdAt DateTime @default(now())
 
@@ -192,4 +194,21 @@ model DebtPayment {
   debt   Debt   @relation(fields: [debtId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
+}
+
+model Budget {
+  id           String  @id @default(uuid())
+  monthlyLimit Decimal @db.Decimal(12, 2) // tracked in approx. USD, same convention as other cross-currency totals in this app
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  categoryId String
+  category   TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
+
+  // One standing monthly limit per category per household -- creating a
+  // budget for a category that already has one updates it instead.
+  @@unique([householdId, categoryId])
 }

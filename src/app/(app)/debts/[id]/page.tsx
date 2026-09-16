@@ -147,7 +147,7 @@ export default function DebtDetailPage() {
             </p>
           </div>
           <div className="text-right">
-            <p className={`text-2xl font-semibold ${debt.status === "PAID_OFF" ? "text-green-600" : "text-red-600"}`}>
+            <p className={`font-display text-2xl font-semibold ${debt.status === "PAID_OFF" ? "text-income-600" : "text-expense-600"}`}>
               {debt.currency} {debt.balance.toFixed(2)}
             </p>
             <p className="text-xs text-gray-400">
@@ -157,7 +157,7 @@ export default function DebtDetailPage() {
           </div>
         </div>
         <div className="mt-3 h-2 w-full rounded-full bg-gray-100">
-          <div className={`h-2 rounded-full ${debt.status === "PAID_OFF" ? "bg-green-500" : "bg-brand-500"}`} style={{ width: `${pct}%` }} />
+          <div className={`h-2 rounded-full ${debt.status === "PAID_OFF" ? "bg-income-500" : "bg-brand-500"}`} style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1 text-xs text-gray-400">{pct}% paid off</p>
         {debt.notes && <p className="mt-3 text-sm text-gray-600">{debt.notes}</p>}
@@ -285,7 +285,7 @@ export default function DebtDetailPage() {
                 <tr key={p.id} className="border-b last:border-0">
                   <td className="p-3">{new Date(p.paymentDate).toLocaleDateString()}</td>
                   <td className="p-3 text-gray-500">{p.note || "—"}</td>
-                  <td className="p-3 text-right font-medium text-green-600">
+                  <td className="p-3 text-right font-medium text-income-600">
                     {p.currency} {Number(p.amount).toFixed(2)}
                     {converted !== null && (
                       <span className="ml-1 text-xs font-normal text-gray-400">
