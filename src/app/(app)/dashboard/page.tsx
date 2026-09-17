@@ -106,6 +106,13 @@ export default function DashboardPage() {
   const [instrumentTxns, setInstrumentTxns] = useState<TransactionDetail[] | null>(null);
   const [instrumentTxnsLoading, setInstrumentTxnsLoading] = useState(false);
 
+  // By-category chart: same pattern as card usage -- always visible, its
+  // own Monthly/YTD toggle, independent of the click-to-reveal Income/
+  // Expenses breakdown above. Shares the selectedCategory/categoryTxns
+  // drill-down state and table with that breakdown, since clicking a bar
+  // means the same thing in both places.
+  const [categoryUsagePeriod, setCategoryUsagePeriod] = useState<Panel>("monthly");
+
   function loadSummary() {
     setLoading(true);
     fetch(`/api/dashboard/summary?month=${month}&year=${year}`)
@@ -415,6 +422,48 @@ export default function DashboardPage() {
           )}
         </div>
       )}
+
+      {/* By category -- same pattern as card usage: always visible, its own Monthly/YTD toggle */}
+      <div className="rounded-lg border bg-white p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-gray-700">
+            By category —{" "}
+            {categoryUsagePeriod === "monthly" ? `${MONTH_NAMES[month - 1]} ${year}` : year === now.getFullYear() ? "year to date" : `full year ${year}`}
+          </h2>
+          <div className="flex rounded-md border p-1 text-xs">
+            <button
+              onClick={() => {
+                setCategoryUsagePeriod("monthly");
+                setSelectedCategory(null);
+                setCategoryTxns(null);
+              }}
+              className={`rounded px-2 py-1 ${categoryUsagePeriod === "monthly" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => {
+                setCategoryUsagePeriod("ytd");
+                setSelectedCategory(null);
+                setCategoryTxns(null);
+              }}
+              className={`rounded px-2 py-1 ${categoryUsagePeriod === "ytd" ? "bg-brand-600 text-white" : "text-gray-600"}`}
+            >
+              YTD
+            </button>
+          </div>
+        </div>
+        {loading || !data ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : (
+          <CategoryBarChart
+            data={data[categoryUsagePeriod].expenseBreakdown}
+            tone="expense"
+            selectedCategoryId={selectedCategory?.id}
+            onCategoryClick={(cat) => handleCategoryClick(categoryUsagePeriod, cat)}
+          />
+        )}
+      </div>
 
       {/* Category breakdown chart -- only rendered once Income or Expenses is clicked */}
       {expandedPanel && expandedKind && data && breakdownData && (
