@@ -36,6 +36,7 @@ model Household {
   recurring   RecurringTemplate[]
   debts       Debt[]
   budgets     Budget[]
+  transfers   Transfer[]
 }
 
 model User {
@@ -56,6 +57,7 @@ model User {
 
   createdTransactions Transaction[] @relation("CreatedByUser")
   ownedDebts          Debt[]
+  createdTransfers    Transfer[]
 }
 
 model PaymentInstrument {
@@ -80,6 +82,8 @@ model PaymentInstrument {
 
   transactions       Transaction[]
   recurringTemplates RecurringTemplate[]
+  transfersOut       Transfer[] @relation("TransferFrom")
+  transfersIn        Transfer[] @relation("TransferTo")
 
   createdAt   DateTime @default(now())
 }
@@ -211,4 +215,33 @@ model Budget {
   // One standing monthly limit per category per household -- creating a
   // budget for a category that already has one updates it instead.
   @@unique([householdId, categoryId])
+}
+
+model Transfer {
+  id       String   @id @default(uuid())
+  amount   Decimal  @db.Decimal(12, 2)
+  currency String   @default("USD") // both instruments are assumed to use this same currency -- no cross-currency conversion here
+  date     DateTime
+  notes    String?  @db.NVarChar(Max)
+
+  // Moves money from one instrument to another WITHOUT counting as income
+  // or an expense -- e.g. paying a credit card bill from a bank account.
+  // The individual purchases were already logged as expenses against the
+  // card; this only keeps each instrument's own running balance accurate.
+  // Deliberately a separate model from Transaction, not a third
+  // "direction" on it, so it can never accidentally leak into any
+  // income/expense total, category breakdown, or budget calculation.
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  fromInstrumentId String
+  fromInstrument   PaymentInstrument @relation("TransferFrom", fields: [fromInstrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  toInstrumentId String
+  toInstrument   PaymentInstrument @relation("TransferTo", fields: [toInstrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
 }

@@ -12,6 +12,7 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.debtPayment.deleteMany({ where: { debt: { householdId } } }),
     prisma.debt.deleteMany({ where: { householdId } }),
     prisma.budget.deleteMany({ where: { householdId } }),
+    prisma.transfer.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
@@ -30,15 +31,18 @@ export async function deleteDebtCascade(debtId: string) {
 
 export async function deleteInstrumentCascade(instrumentId: string) {
   // Instruments are usually archived rather than deleted (see the
-  // `archived` flag) once they have transaction history, since deleting
-  // one out from under existing transactions would orphan them. This
+  // `archived` flag) once they have transaction or transfer history, since
+  // deleting one out from under existing records would orphan them. This
   // helper is for the rare case of removing an instrument that was
-  // created by mistake and has no transactions yet.
-  const count = await prisma.transaction.count({ where: { instrumentId } });
-  if (count > 0) {
+  // created by mistake and has no history yet.
+  const [txnCount, transferCount] = await Promise.all([
+    prisma.transaction.count({ where: { instrumentId } }),
+    prisma.transfer.count({ where: { OR: [{ fromInstrumentId: instrumentId }, { toInstrumentId: instrumentId }] } }),
+  ]);
+  if (txnCount > 0 || transferCount > 0) {
     throw new Error(
-      "This instrument has existing transactions — archive it instead of deleting, " +
-        "or reassign its transactions to another instrument first."
+      "This instrument has existing transactions or transfers — archive it instead of deleting, " +
+        "or reassign its history to another instrument first."
     );
   }
   await prisma.$transaction([
