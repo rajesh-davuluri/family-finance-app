@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import AddTransactionModal, { EditableTransaction } from "@/components/AddTransactionModal";
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -40,7 +41,7 @@ export default function TransactionsPage() {
   const [form, setForm] = useState({
     amount: "",
     currency: "USD",
-    date: new Date().toISOString().slice(0, 10),
+    date: getTodayLocal(),
     notes: "",
     categoryId: "",
     instrumentId: "",
@@ -335,7 +336,7 @@ export default function TransactionsPage() {
             <tbody>
               {filteredTransactions.map((t) => (
                 <tr key={t.id} className="border-b last:border-0">
-                  <td className="p-3">{new Date(t.date).toLocaleDateString()}</td>
+                  <td className="p-3">{formatDate(t.date)}</td>
                   <td className="p-3">{t.category.name}</td>
                   <td className="p-3">{t.instrument.name}</td>
                   <td className="p-3 text-gray-500">{t.notes || "—"}</td>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { debtToApproxUsd, convertToDebtCurrency } from "@/lib/debtCalculations";
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { CURRENCIES } from "@/lib/enums";
 
 type Payment = { id: string; amount: string; currency: string; paymentDate: string; note: string | null };
@@ -39,7 +40,7 @@ export default function DebtDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ amount: "", currency: "USD", paymentDate: new Date().toISOString().slice(0, 10), note: "" });
+  const [form, setForm] = useState({ amount: "", currency: "USD", paymentDate: getTodayLocal(), note: "" });
   const [submitting, setSubmitting] = useState(false);
 
   const [editingRate, setEditingRate] = useState(false);
@@ -283,7 +284,7 @@ export default function DebtDetailPage() {
               const converted = paymentIsForeign ? convertToDebtCurrency(Number(p.amount), p.currency, debtInfo) : null;
               return (
                 <tr key={p.id} className="border-b last:border-0">
-                  <td className="p-3">{new Date(p.paymentDate).toLocaleDateString()}</td>
+                  <td className="p-3">{formatDate(p.paymentDate)}</td>
                   <td className="p-3 text-gray-500">{p.note || "—"}</td>
                   <td className="p-3 text-right font-medium text-income-600">
                     {p.currency} {Number(p.amount).toFixed(2)}

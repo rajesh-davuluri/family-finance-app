@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
 type Instrument = {
   id: string;
@@ -42,7 +43,7 @@ export default function InstrumentsPage() {
 
   // Which instrument's balance is currently being edited, if any.
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
-  const [balanceForm, setBalanceForm] = useState({ amount: "", date: new Date().toISOString().slice(0, 10) });
+  const [balanceForm, setBalanceForm] = useState({ amount: "", date: getTodayLocal() });
 
   // Transfer form -- moves money between two of your own instruments
   // without counting as income or an expense (e.g. paying a credit card
@@ -52,7 +53,7 @@ export default function InstrumentsPage() {
     toInstrumentId: "",
     amount: "",
     currency: "USD",
-    date: new Date().toISOString().slice(0, 10),
+    date: getTodayLocal(),
     notes: "",
   });
   const [transferSubmitting, setTransferSubmitting] = useState(false);
@@ -117,7 +118,7 @@ export default function InstrumentsPage() {
   function startEditingBalance(i: Instrument) {
     setBalanceForm({
       amount: i.openingBalance ? String(i.openingBalance) : "",
-      date: i.openingBalanceDate ? i.openingBalanceDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      date: i.openingBalanceDate ? i.openingBalanceDate.slice(0, 10) : getTodayLocal(),
     });
     setEditingBalanceId(i.id);
   }
@@ -416,7 +417,7 @@ export default function InstrumentsPage() {
             <tbody>
               {transfers.map((t) => (
                 <tr key={t.id} className="border-b last:border-0">
-                  <td className="p-3">{new Date(t.date).toLocaleDateString()}</td>
+                  <td className="p-3">{formatDate(t.date)}</td>
                   <td className="p-3">{t.fromInstrument.name}</td>
                   <td className="p-3">{t.toInstrument.name}</td>
                   <td className="p-3 text-gray-500">{t.notes || "—"}</td>

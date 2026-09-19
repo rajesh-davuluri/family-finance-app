@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
-import { Analytics } from "@vercel/analytics/next"
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; archived: boolean };
@@ -34,7 +34,7 @@ export default function RecurringPage() {
     currency: "USD",
     notes: "",
     frequency: "MONTHLY",
-    nextRunAt: new Date().toISOString().slice(0, 10),
+    nextRunAt: getTodayLocal(),
     categoryId: "",
     instrumentId: "",
   });
@@ -230,7 +230,7 @@ export default function RecurringPage() {
           <tbody>
             {templates.map((t) => (
               <tr key={t.id} className="border-b last:border-0">
-                <td className="p-3">{new Date(t.nextRunAt).toLocaleDateString()}</td>
+                <td className="p-3">{formatDate(t.nextRunAt)}</td>
                 <td className="p-3">{FREQ_LABELS[t.frequency] ?? t.frequency}</td>
                 <td className="p-3">{t.category.name}</td>
                 <td className="p-3">{t.instrument.name}</td>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
+import { formatDate } from "@/lib/formatDate";
 
 type CategorySlice = { id: string; name: string; total: number };
 
@@ -403,7 +404,7 @@ export default function DashboardPage() {
               <tbody>
                 {instrumentTxns.map((t) => (
                   <tr key={t.id} className="border-b last:border-0">
-                    <td className="py-2">{new Date(t.date).toLocaleDateString()}</td>
+                    <td className="py-2">{formatDate(t.date)}</td>
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
                     <td className="py-2 text-right font-medium text-expense-600">
                       {t.currency} {Number(t.amount).toFixed(2)}
@@ -527,7 +528,7 @@ export default function DashboardPage() {
               <tbody>
                 {categoryTxns.map((t) => (
                   <tr key={t.id} className="border-b last:border-0">
-                    <td className="py-2">{new Date(t.date).toLocaleDateString()}</td>
+                    <td className="py-2">{formatDate(t.date)}</td>
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
                     <td className="py-2">{t.instrument.name}</td>
                     <td className={`py-2 text-right font-medium ${expandedKind === "income" ? "text-income-600" : "text-expense-600"}`}>

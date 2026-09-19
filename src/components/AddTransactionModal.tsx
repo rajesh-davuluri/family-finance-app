@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
+import { getTodayLocal } from "@/lib/formatDate";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -37,7 +38,7 @@ export default function AddTransactionModal({
   const [form, setForm] = useState({
     amount: "",
     currency: "USD",
-    date: new Date().toISOString().slice(0, 10),
+    date: getTodayLocal(),
     notes: "",
     categoryId: "",
     instrumentId: "",

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { DebtCategory, InstallmentFrequency, CURRENCIES } from "@/lib/enums";
 import { getDefaultRate } from "@/lib/fx";
+import { getTodayLocal } from "@/lib/formatDate";
 import { debtToApproxUsd } from "@/lib/debtCalculations";
 
 type Debt = {
@@ -48,7 +49,7 @@ export default function DebtsPage() {
     conversionRateToUsd: "",
     originalPrincipal: "",
     interestRate: "",
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: getTodayLocal(),
     installmentAmount: "",
     installmentFrequency: "",
     ownerId: "",
