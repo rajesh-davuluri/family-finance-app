@@ -37,6 +37,7 @@ model Household {
   debts       Debt[]
   budgets     Budget[]
   transfers   Transfer[]
+  goals       SavingsGoal[]
 }
 
 model User {
@@ -84,6 +85,7 @@ model PaymentInstrument {
   recurringTemplates RecurringTemplate[]
   transfersOut       Transfer[] @relation("TransferFrom")
   transfersIn        Transfer[] @relation("TransferTo")
+  goals              SavingsGoal[]
 
   createdAt   DateTime @default(now())
 }
@@ -242,6 +244,25 @@ model Transfer {
 
   createdById String
   createdBy   User   @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
+}
+
+model SavingsGoal {
+  id           String    @id @default(uuid())
+  name         String    // e.g. "Emergency Fund", "Trip to India"
+  targetAmount Decimal   @db.Decimal(12, 2)
+  currency     String    @default("USD")
+  targetDate   DateTime?
+
+  // Progress is measured as the linked instrument's own current balance --
+  // never stored here, so it can't drift. The common pattern is one
+  // dedicated savings account per goal.
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
 }

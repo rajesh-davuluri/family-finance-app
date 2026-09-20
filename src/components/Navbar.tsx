@@ -8,10 +8,13 @@ const links = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/transactions", label: "Transactions" },
   { href: "/budgets", label: "Budgets" },
+  { href: "/goals", label: "Goals" },
+  { href: "/net-worth", label: "Net Worth" },
   { href: "/debts", label: "Debts" },
   { href: "/recurring", label: "Recurring" },
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
+  { href: "/import", label: "Import" },
   { href: "/household", label: "Household" },
   { href: "/settings", label: "Settings" },
 ];

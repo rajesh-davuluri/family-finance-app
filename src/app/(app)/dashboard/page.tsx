@@ -36,6 +36,28 @@ type TransactionDetail = {
 
 type BudgetSummary = { id: string; monthlyLimit: string; spent: number; category: { id: string; name: string } };
 
+type UpcomingBill = {
+  id: string;
+  amount: string;
+  currency: string;
+  frequency: string;
+  nextRunAt: string;
+  active: boolean;
+  category: { name: string; direction: "INCOME" | "EXPENSE" };
+  instrument: { name: string };
+};
+
+type ActivityItem = {
+  id: string;
+  type: "transaction" | "transfer";
+  createdByName: string;
+  direction: "INCOME" | "EXPENSE" | "TRANSFER";
+  amount: number;
+  currency: string;
+  description: string;
+  date: string;
+};
+
 type Panel = "monthly" | "ytd";
 type Kind = "income" | "expense";
 
@@ -114,6 +136,11 @@ export default function DashboardPage() {
   // means the same thing in both places.
   const [categoryUsagePeriod, setCategoryUsagePeriod] = useState<Panel>("monthly");
 
+  // Upcoming bills and household activity -- both independent of the
+  // month/year selector, loaded once on mount.
+  const [upcomingBills, setUpcomingBills] = useState<UpcomingBill[] | null>(null);
+  const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+
   function loadSummary() {
     setLoading(true);
     fetch(`/api/dashboard/summary?month=${month}&year=${year}`)
@@ -144,6 +171,24 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadBudgets();
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/recurring")
+      .then((r) => r.json())
+      .then((templates: UpcomingBill[]) => {
+        const in7Days = new Date();
+        in7Days.setDate(in7Days.getDate() + 7);
+        const upcoming = templates
+          .filter((t) => t.active && new Date(t.nextRunAt) <= in7Days)
+          .sort((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime())
+          .slice(0, 5);
+        setUpcomingBills(upcoming);
+      });
+
+    fetch("/api/activity")
+      .then((r) => r.json())
+      .then(setActivity);
   }, []);
 
   function handleTransactionAdded() {
@@ -222,6 +267,33 @@ export default function DashboardPage() {
       </div>
 
       <AddTransactionModal open={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={handleTransactionAdded} />
+
+      {/* Upcoming bills -- due in the next 7 days, from Recurring templates */}
+      {upcomingBills && upcomingBills.length > 0 && (
+        <div className="rounded-lg border bg-white p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-gray-700">Upcoming in the next 7 days</h2>
+            <a href="/recurring" className="text-xs text-brand-600 hover:underline">
+              Manage recurring
+            </a>
+          </div>
+          <div className="space-y-2">
+            {upcomingBills.map((b) => (
+              <div key={b.id} className="flex items-center justify-between text-sm">
+                <span>
+                  {b.category.name} <span className="text-gray-400">· {b.instrument.name}</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  <span className="text-gray-400">{formatDate(b.nextRunAt)}</span>
+                  <span className={`font-medium ${b.category.direction === "INCOME" ? "text-income-600" : "text-expense-600"}`}>
+                    {b.currency} {Number(b.amount).toFixed(2)}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Monthly grid */}
       <div className="rounded-lg border bg-white p-4">
@@ -546,6 +618,31 @@ export default function DashboardPage() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {/* Household activity feed -- recent transactions and transfers, who added what */}
+      {activity && activity.length > 0 && (
+        <div className="rounded-lg border bg-white p-4">
+          <h2 className="mb-3 text-sm font-medium text-gray-700">Recent activity</h2>
+          <div className="space-y-2">
+            {activity.map((a) => (
+              <div key={a.id} className="flex items-center justify-between text-sm">
+                <span>
+                  <span className="font-medium">{a.createdByName}</span>{" "}
+                  <span className="text-gray-500">{a.type === "transfer" ? "transferred" : "logged"}</span>{" "}
+                  {a.description} <span className="text-gray-400">· {formatDate(a.date)}</span>
+                </span>
+                <span
+                  className={`font-medium ${
+                    a.direction === "INCOME" ? "text-income-600" : a.direction === "EXPENSE" ? "text-expense-600" : "text-gray-500"
+                  }`}
+                >
+                  {a.currency} {a.amount.toFixed(2)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

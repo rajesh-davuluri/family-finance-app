@@ -11,24 +11,36 @@ import { prisma } from "@/lib/prisma";
 // balance doesn't become 500 after a ₹500 transaction). A multi-currency
 // account isn't modeled here; use separate instruments per currency if
 // needed.
+//
+// asOfDate is optional and lets a caller ask "what was the balance as of
+// this past date" (used for the Net Worth trend) rather than the current
+// balance -- omit it for the normal, current-balance case.
 export async function computeInstrumentBalance(
   instrumentId: string,
   openingBalance: number,
-  openingBalanceDate: Date
+  openingBalanceDate: Date,
+  asOfDate?: Date
 ): Promise<number> {
   const instrument = await prisma.paymentInstrument.findUnique({ where: { id: instrumentId } });
   if (!instrument) return openingBalance;
 
+  // Asking for a point in time before the opening balance was even set --
+  // there's nothing earlier to reconstruct, so treat it as the opening
+  // balance itself rather than guessing.
+  if (asOfDate && asOfDate < openingBalanceDate) return openingBalance;
+
+  const dateFilter = { gte: openingBalanceDate, ...(asOfDate ? { lte: asOfDate } : {}) };
+
   const [transactions, transfersOut, transfersIn] = await Promise.all([
     prisma.transaction.findMany({
-      where: { instrumentId, date: { gte: openingBalanceDate }, currency: instrument.currency },
+      where: { instrumentId, date: dateFilter, currency: instrument.currency },
       include: { category: true },
     }),
     prisma.transfer.findMany({
-      where: { fromInstrumentId: instrumentId, date: { gte: openingBalanceDate }, currency: instrument.currency },
+      where: { fromInstrumentId: instrumentId, date: dateFilter, currency: instrument.currency },
     }),
     prisma.transfer.findMany({
-      where: { toInstrumentId: instrumentId, date: { gte: openingBalanceDate }, currency: instrument.currency },
+      where: { toInstrumentId: instrumentId, date: dateFilter, currency: instrument.currency },
     }),
   ]);
 
