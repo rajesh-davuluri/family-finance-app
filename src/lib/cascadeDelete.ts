@@ -67,3 +67,10 @@ export async function deleteCategoryCascade(categoryId: string, reassignToCatego
     prisma.transactionCategory.delete({ where: { id: categoryId } }),
   ]);
 }
+
+export async function deleteDebtCascade(debtId: string) {
+  await prisma.$transaction([
+    prisma.debtPayment.deleteMany({ where: { debtId } }),
+    prisma.debt.delete({ where: { id: debtId } }),
+  ]);
+}
