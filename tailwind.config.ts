@@ -2,8 +2,8 @@ import type { Config } from "tailwindcss";
 
 // "Household ledger," not "SaaS dashboard" -- ink navy for text/structure,
 // warm brass as the single accent (income + primary actions), a muted brick
-// for expenses instead of stock red-600, warm paper background instead of
-// pure white. See the chat for the fuller design rationale.
+// for expenses instead of stock red-600, light blue page background instead
+// of pure white. See the chat for the fuller design rationale.
 const config: Config = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
   theme: {
@@ -29,8 +29,8 @@ const config: Config = {
           800: "#22323F",
           900: "#1C2B3A",
         },
-        // Warm paper background instead of pure white.
-        paper: "#FAF7F2",
+        // Light blue page background instead of pure white.
+        paper: "#EAF4FC",
         // Semantic money colors -- deliberately not Tailwind's stock
         // green-600/red-600, which are also used elsewhere for unrelated
         // status meaning (e.g. "Active").
