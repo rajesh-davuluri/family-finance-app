@@ -38,6 +38,7 @@ model Household {
   budgets     Budget[]
   transfers   Transfer[]
   goals       SavingsGoal[]
+  notifications Notification[]
 }
 
 model User {
@@ -59,6 +60,7 @@ model User {
   createdTransactions Transaction[] @relation("CreatedByUser")
   ownedDebts          Debt[]
   createdTransfers    Transfer[]
+  notifications       Notification[]
 }
 
 model PaymentInstrument {
@@ -265,4 +267,24 @@ model SavingsGoal {
   instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
+}
+
+model Notification {
+  id      String  @id @default(uuid())
+  message String  @db.NVarChar(Max) // plain-language summary, e.g. "Priya added a $45.00 Food expense"
+  read    Boolean @default(false)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // The recipient -- one row per person notified. When Rajesh logs a
+  // transaction, a Notification row is created for every OTHER household
+  // member (not for Rajesh himself), so each person only sees things
+  // someone else did.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
 }

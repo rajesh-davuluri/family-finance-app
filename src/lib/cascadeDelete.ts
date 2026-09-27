@@ -13,6 +13,8 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.debt.deleteMany({ where: { householdId } }),
     prisma.budget.deleteMany({ where: { householdId } }),
     prisma.transfer.deleteMany({ where: { householdId } }),
+    prisma.savingsGoal.deleteMany({ where: { householdId } }),
+    prisma.notification.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
@@ -22,27 +24,21 @@ export async function deleteHouseholdCascade(householdId: string) {
   ]);
 }
 
-export async function deleteDebtCascade(debtId: string) {
-  await prisma.$transaction([
-    prisma.debtPayment.deleteMany({ where: { debtId } }),
-    prisma.debt.delete({ where: { id: debtId } }),
-  ]);
-}
-
 export async function deleteInstrumentCascade(instrumentId: string) {
   // Instruments are usually archived rather than deleted (see the
   // `archived` flag) once they have transaction or transfer history, since
   // deleting one out from under existing records would orphan them. This
   // helper is for the rare case of removing an instrument that was
   // created by mistake and has no history yet.
-  const [txnCount, transferCount] = await Promise.all([
+  const [txnCount, transferCount, goalCount] = await Promise.all([
     prisma.transaction.count({ where: { instrumentId } }),
     prisma.transfer.count({ where: { OR: [{ fromInstrumentId: instrumentId }, { toInstrumentId: instrumentId }] } }),
+    prisma.savingsGoal.count({ where: { instrumentId } }),
   ]);
-  if (txnCount > 0 || transferCount > 0) {
+  if (txnCount > 0 || transferCount > 0 || goalCount > 0) {
     throw new Error(
-      "This instrument has existing transactions or transfers — archive it instead of deleting, " +
-        "or reassign its history to another instrument first."
+      "This instrument has existing transactions, transfers, or a linked savings goal — archive it instead of " +
+        "deleting, or reassign its history to another instrument first."
     );
   }
   await prisma.$transaction([

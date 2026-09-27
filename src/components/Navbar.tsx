@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
+import NotificationBell from "@/components/NotificationBell";
 
 // Kept to the pages used day-to-day. Everything else lives under "More" --
 // at 12 total links the row was overflowing and wrapping onto two lines,
@@ -96,9 +97,12 @@ export default function Navbar() {
           </div>
         </div>
 
-        <button onClick={() => signOut({ callbackUrl: "/login" })} className="ml-auto whitespace-nowrap text-sm text-ink-300 hover:text-white">
-          Sign out
-        </button>
+        <div className="ml-auto flex items-center gap-4">
+          <NotificationBell />
+          <button onClick={() => signOut({ callbackUrl: "/login" })} className="whitespace-nowrap text-sm text-ink-300 hover:text-white">
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Mobile links -- full flat list, horizontally scrollable */}

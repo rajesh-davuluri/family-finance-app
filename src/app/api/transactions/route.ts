@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { Currency } from "@/lib/enums";
+import { notifyHousehold } from "@/lib/notify";
 
 const createSchema = z.object({
   amount: z.number().positive(),
@@ -74,5 +75,13 @@ export async function POST(req: Request) {
     },
     include: { category: true, instrument: true },
   });
+
+  const verb = category.direction === "INCOME" ? "income" : "an expense";
+  await notifyHousehold(
+    user.householdId,
+    user.id,
+    `${user.name} added ${verb}: ${data.currency} ${data.amount.toFixed(2)} (${category.name}) on ${instrument.name}`
+  );
+
   return NextResponse.json(transaction, { status: 201 });
 }
