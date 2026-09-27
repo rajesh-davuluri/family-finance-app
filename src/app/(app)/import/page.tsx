@@ -3,9 +3,21 @@
 import { useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
+import { formatDate } from "@/lib/formatDate";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
+
+type ExistingMatch = {
+  id: string;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  categoryName: string;
+  instrumentName: string;
+  sameInstrument: boolean;
+};
 
 type PreviewRow = {
   rawDate: string;
@@ -15,7 +27,14 @@ type PreviewRow = {
   amount: number;
   categoryId: string;
   include: boolean;
+  // Existing transaction with the same date + amount, found when the preview
+  // was built. Only shown while the row's date/amount still match it.
+  match: ExistingMatch | null;
 };
+
+function isDuplicate(r: PreviewRow) {
+  return !!r.match && r.match.date === r.date && Math.round(r.match.amount * 100) === Math.round(r.amount * 100);
+}
 
 function normalizeDate(raw: string): string {
   // Handles "2026-09-15", "09/15/2026", and "9/15/26" -- the common shapes
@@ -48,6 +67,8 @@ export default function ImportPage() {
   const [rows, setRows] = useState<PreviewRow[]>([]);
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
@@ -95,12 +116,24 @@ export default function ImportPage() {
     });
   }
 
-  function proceedToPreview() {
+  async function findExistingMatches(preview: PreviewRow[]): Promise<(ExistingMatch | null)[] | null> {
+    const res = await fetch("/api/transactions/bulk/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instrumentId, rows: preview.map((r) => ({ date: r.date, amount: r.amount })) }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body.matches;
+  }
+
+  async function proceedToPreview() {
     if (!columnMap.date || !columnMap.description || !columnMap.amount) {
       setError("Map all three columns before continuing.");
       return;
     }
     setError(null);
+    setShowOnlyDuplicates(false);
     const defaultCategoryId = bulkCategoryId;
     const preview: PreviewRow[] = rawRows.map((r) => {
       const rawAmount = r[columnMap.amount] ?? "";
@@ -113,8 +146,23 @@ export default function ImportPage() {
         amount,
         categoryId: defaultCategoryId,
         include: amount > 0,
+        match: null,
       };
     });
+
+    // Before anything is inserted, look for transactions already in the app
+    // with the same date and amount, and leave those rows unchecked.
+    setChecking(true);
+    const matches = await findExistingMatches(preview);
+    setChecking(false);
+    if (matches) {
+      preview.forEach((r, i) => {
+        r.match = matches[i] ?? null;
+        if (r.match) r.include = false;
+      });
+    } else {
+      setError("Couldn't check for transactions already in the app — review the rows carefully before importing.");
+    }
     setRows(preview);
     setStep("preview");
   }
@@ -157,6 +205,8 @@ export default function ImportPage() {
     setRawRows([]);
     setRows([]);
   }
+
+  const duplicateCount = rows.filter(isDuplicate).length;
 
   const noSetupYet = loaded && (instruments.length === 0 || categories.length === 0);
 
@@ -246,9 +296,10 @@ export default function ImportPage() {
             </button>
             <button
               onClick={proceedToPreview}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              disabled={checking}
+              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              Preview {rawRows.length} row{rawRows.length === 1 ? "" : "s"}
+              {checking ? "Checking for existing transactions..." : `Preview ${rawRows.length} row${rawRows.length === 1 ? "" : "s"}`}
             </button>
           </div>
         </div>
@@ -256,6 +307,31 @@ export default function ImportPage() {
 
       {step === "preview" && (
         <div className="space-y-4">
+          {duplicateCount > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <span>
+                {duplicateCount} of {rows.length} row{rows.length === 1 ? "" : "s"} match a transaction already in the app
+                (same date and amount). They&apos;re unchecked so they won&apos;t be imported again — tick any that are
+                genuinely new.
+              </span>
+              <label className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={showOnlyDuplicates}
+                  onChange={(e) => setShowOnlyDuplicates(e.target.checked)}
+                />
+                Show only these rows
+              </label>
+            </div>
+          ) : (
+            rows.length > 0 &&
+            !error && (
+              <p className="rounded-lg border border-income-500/30 bg-income-500/5 p-3 text-sm text-income-600">
+                None of these rows match a transaction already in the app.
+              </p>
+            )
+          )}
+
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white p-4">
             <span className="text-sm text-gray-500">Apply category to all rows:</span>
             <select
@@ -283,11 +359,15 @@ export default function ImportPage() {
                   <th className="p-2">Description</th>
                   <th className="p-2 text-right">Amount</th>
                   <th className="p-2">Category</th>
+                  <th className="p-2">Already in app?</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="border-b last:border-0">
+                {rows.map((r, i) => {
+                  const dup = isDuplicate(r);
+                  if (showOnlyDuplicates && !dup) return null;
+                  return (
+                  <tr key={i} className={`border-b last:border-0 ${dup ? "bg-amber-50" : ""}`}>
                     <td className="p-2">
                       <input type="checkbox" checked={r.include} onChange={(e) => updateRow(i, { include: e.target.checked })} />
                     </td>
@@ -324,8 +404,25 @@ export default function ImportPage() {
                         ))}
                       </select>
                     </td>
+                    <td className="p-2 text-xs">
+                      {dup && r.match ? (
+                        <span
+                          className="text-amber-800"
+                          title={r.match.notes ? `Existing note: ${r.match.notes}` : undefined}
+                        >
+                          Yes — {formatDate(r.match.date)}, {r.match.currency} {r.match.amount.toFixed(2)}
+                          <span className="block text-amber-700/80">
+                            {r.match.categoryName} · {r.match.instrumentName}
+                            {!r.match.sameInstrument && " (different account)"}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">New</span>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
