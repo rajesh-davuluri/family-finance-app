@@ -23,6 +23,7 @@ const moreLinks = [
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
   { href: "/import", label: "Import" },
+  { href: "/reconcile", label: "Reconcile" },
   { href: "/household", label: "Household" },
   { href: "/settings", label: "Settings" },
 ];

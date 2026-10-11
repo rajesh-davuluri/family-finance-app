@@ -13,6 +13,7 @@ export const config = {
     "/instruments/:path*",
     "/categories/:path*",
     "/import/:path*",
+    "/reconcile/:path*",
     "/recurring/:path*",
     "/household/:path*",
     "/settings/:path*",

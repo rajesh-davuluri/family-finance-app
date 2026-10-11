@@ -10,6 +10,7 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Categories** — income/expense categories, seeded with sensible defaults on signup
 - **Transactions** — multi-currency, filterable, with notes
 - **Recurring transactions** — templates that auto-generate real transactions on a schedule (or on-demand via a "Generate now" button)
+- **Statement reconciliation** — upload a credit card statement PDF (PDF only; read in memory, never stored) to see which of its transactions are already recorded, matched by amount and/or date, which are missing (add them in one click), and which app entries for that card aren't on the statement
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 
 ## 1. Prerequisites
