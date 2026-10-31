@@ -39,6 +39,7 @@ model Household {
   transfers   Transfer[]
   goals       SavingsGoal[]
   notifications Notification[]
+  importBatches ImportBatch[]
 }
 
 model User {
@@ -61,6 +62,7 @@ model User {
   ownedDebts          Debt[]
   createdTransfers    Transfer[]
   notifications       Notification[]
+  importBatches       ImportBatch[]
 }
 
 model PaymentInstrument {
@@ -88,6 +90,7 @@ model PaymentInstrument {
   transfersOut       Transfer[] @relation("TransferFrom")
   transfersIn        Transfer[] @relation("TransferTo")
   goals              SavingsGoal[]
+  importBatches      ImportBatch[]
 
   createdAt   DateTime @default(now())
 }
@@ -131,6 +134,10 @@ model Transaction {
 
   recurringTemplateId String?
   recurringTemplate   RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // Set when the transaction came from a CSV import, null when entered by hand.
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
 
@@ -287,4 +294,34 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+// One row per CSV import, so the Import page can show when the household
+// last imported and which statement files have already been brought in.
+model ImportBatch {
+  id             String @id @default(uuid())
+  fileName       String @db.NVarChar(255)
+  currency       String
+  rowsInFile     Int    // every data row the CSV contained
+  importedCount  Int    // rows actually inserted as transactions
+  duplicateCount Int    // rows flagged as already in the app (same date + amount)
+
+  // Earliest and latest transaction dates in the file -- the statement period.
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, createdAt])
 }

@@ -34,6 +34,16 @@ export default function LoginPage() {
       setError(needsMfa ? "That code didn't work — try again." : "Enter the code from your authenticator app.");
       return;
     }
+    if (result?.error === "SERVER_UNAVAILABLE") {
+      setError("The server couldn't reach the database — this isn't your password. Try again in a minute.");
+      return;
+    }
+    if (result?.error && result.error !== "CredentialsSignin") {
+      // Anything other than a plain credential mismatch is a server-side
+      // failure (misconfiguration, crash) rather than a wrong password.
+      setError(`Sign-in failed on the server (${result.error}). This isn't your password.`);
+      return;
+    }
     if (result?.error) {
       setError("Incorrect email or password.");
       return;
