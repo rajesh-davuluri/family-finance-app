@@ -31,8 +31,21 @@ export const authOptions: NextAuthOptions = {
         // it separately so the login page can say the server is the problem.
         let user;
         try {
+          // Select only what sign-in needs, so a column added later (e.g. the
+          // login-time fields, if their migration hasn't run yet) can never
+          // stop people from logging in.
           user = await prisma.user.findUnique({
             where: { email: credentials.email.toLowerCase() },
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              passwordHash: true,
+              householdId: true,
+              role: true,
+              mfaEnabled: true,
+              mfaSecretEncrypted: true,
+            },
           });
         } catch (err) {
           console.error("Login failed: couldn't query the database", err);
@@ -64,9 +77,14 @@ export const authOptions: NextAuthOptions = {
 
         // Record the sign-in. A failure here shouldn't block logging in.
         try {
+          const { lastLoginAt } = await prisma.user.findUniqueOrThrow({
+            where: { id: user.id },
+            select: { lastLoginAt: true },
+          });
           await prisma.user.update({
             where: { id: user.id },
-            data: { previousLoginAt: user.lastLoginAt, lastLoginAt: new Date() },
+            data: { previousLoginAt: lastLoginAt, lastLoginAt: new Date() },
+            select: { id: true },
           });
         } catch (err) {
           console.error("Couldn't record login time", err);
