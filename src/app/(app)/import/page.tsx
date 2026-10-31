@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate } from "@/lib/formatDate";
+import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -101,8 +102,20 @@ export default function ImportPage() {
     }
   }
 
+  const [lastActivity, setLastActivity] = useState<LastActivity | null>(null);
+
+  async function loadLastActivity() {
+    try {
+      const res = await fetch("/api/transactions/last-activity");
+      if (res.ok) setLastActivity(await res.json());
+    } catch {
+      // Non-essential -- the section just stays hidden.
+    }
+  }
+
   useEffect(() => {
     loadHistory();
+    loadLastActivity();
   }, []);
 
   async function ensureOptionsLoaded() {
@@ -248,6 +261,7 @@ export default function ImportPage() {
     setRawRows([]);
     setRows([]);
     loadHistory();
+    loadLastActivity();
   }
 
   const duplicateCount = rows.filter(isDuplicate).length;
@@ -275,6 +289,10 @@ export default function ImportPage() {
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           You need at least one category and one payment instrument before importing — set those up first.
         </div>
+      )}
+
+      {step === "upload" && lastActivity && lastActivity.instruments.length > 0 && (
+        <RecordsUpTo instruments={lastActivity.instruments} />
       )}
 
       {step === "upload" && lastImport && (
@@ -520,16 +538,6 @@ export default function ImportPage() {
   );
 }
 
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 function ImportHistory({ history, failed }: { history: ImportRecord[] | null; failed: boolean }) {
   return (
     <div className="space-y-2">
@@ -588,6 +596,69 @@ function ImportHistory({ history, failed }: { history: ImportRecord[] | null; fa
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  BANK_ACCOUNT: "Bank account",
+  CREDIT_CARD: "Credit card",
+  CASH: "Cash",
+  OTHER: "Other",
+};
+
+// Per account: the latest transaction date on record (so you know which
+// statement period to import next) and when anything was last added.
+function RecordsUpTo({ instruments }: { instruments: LastActivity["instruments"] }) {
+  // Credit cards first -- they're what gets imported from statements.
+  const sorted = [...instruments].sort(
+    (a, b) => Number(b.type === "CREDIT_CARD") - Number(a.type === "CREDIT_CARD") || a.name.localeCompare(b.name)
+  );
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-medium text-gray-700">Where your records are up to</h2>
+      <div className="overflow-x-auto rounded-lg border bg-white">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-gray-500">
+              <th className="p-2">Account</th>
+              <th className="p-2">Latest transaction dated</th>
+              <th className="p-2">Last added</th>
+              <th className="p-2 text-right">Transactions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((i) => {
+              const stale = i.latestTransactionDate !== null && daysSince(i.latestTransactionDate) >= STALE_AFTER_DAYS;
+              return (
+                <tr key={i.id} className="border-b last:border-0">
+                  <td className="p-2">
+                    <span className="font-medium">{i.name}</span>
+                    {i.last4 && <span className="text-gray-400"> ({i.last4})</span>}
+                    <span className="block text-xs text-gray-400">{TYPE_LABELS[i.type] ?? i.type}</span>
+                  </td>
+                  <td className={`whitespace-nowrap p-2 ${stale ? "text-amber-700" : "text-gray-600"}`}>
+                    {i.latestTransactionDate ? (
+                      <>
+                        {formatDate(i.latestTransactionDate)}
+                        <span className="block text-xs">
+                          {daysSince(i.latestTransactionDate)} days ago{stale && " — import newer statements"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-gray-400">Nothing yet</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap p-2 text-gray-600">
+                    {i.lastAddedAt ? formatDateTime(i.lastAddedAt) : "—"}
+                  </td>
+                  <td className="p-2 text-right text-gray-600">{i.transactionCount}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

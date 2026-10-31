@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import { formatDate } from "@/lib/formatDate";
+import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
 type CategorySlice = { id: string; name: string; total: number };
 
@@ -140,6 +141,7 @@ export default function DashboardPage() {
   // month/year selector, loaded once on mount.
   const [upcomingBills, setUpcomingBills] = useState<UpcomingBill[] | null>(null);
   const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+  const [lastActivity, setLastActivity] = useState<LastActivity | null>(null);
 
   function loadSummary() {
     setLoading(true);
@@ -189,12 +191,22 @@ export default function DashboardPage() {
     fetch("/api/activity")
       .then((r) => r.json())
       .then(setActivity);
+
+    loadLastActivity();
   }, []);
+
+  function loadLastActivity() {
+    fetch("/api/transactions/last-activity")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setLastActivity)
+      .catch(() => setLastActivity(null));
+  }
 
   function handleTransactionAdded() {
     setShowAddModal(false);
     loadSummary();
     loadBudgets();
+    loadLastActivity();
     // A new transaction can change whatever breakdown/drill-down was open,
     // so close those rather than show stale figures.
     setExpandedPanel(null);
@@ -265,6 +277,8 @@ export default function DashboardPage() {
           Add Transaction
         </button>
       </div>
+
+      {lastActivity && <LastAddedLine lastActivity={lastActivity} />}
 
       <AddTransactionModal open={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={handleTransactionAdded} />
 
@@ -646,5 +660,46 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function LastAddedLine({ lastActivity }: { lastActivity: LastActivity }) {
+  const last = lastActivity.lastAdded;
+  if (!last) {
+    return (
+      <p className="rounded-lg border bg-white p-3 text-sm text-gray-500">
+        No transactions yet — add one or{" "}
+        <a href="/import" className="text-brand-600 hover:underline">
+          import a statement
+        </a>
+        .
+      </p>
+    );
+  }
+  const days = daysSince(last.createdAt);
+  const stale = days >= STALE_AFTER_DAYS;
+  return (
+    <p
+      className={`rounded-lg border p-3 text-sm ${
+        stale ? "border-amber-200 bg-amber-50 text-amber-800" : "bg-white text-gray-600"
+      }`}
+    >
+      <span className="font-medium">Last transaction added:</span> {formatDateTime(last.createdAt)} by{" "}
+      {last.createdByName} — {last.categoryName} ·{" "}
+      <span className={last.direction === "INCOME" ? "text-income-600" : "text-expense-600"}>
+        {last.currency} {last.amount.toFixed(2)}
+      </span>{" "}
+      on {last.instrumentName} (dated {formatDate(last.date)}).
+      {stale && (
+        <>
+          {" "}
+          That was {days} days ago —{" "}
+          <a href="/import" className="font-medium underline">
+            import your latest statements
+          </a>
+          .
+        </>
+      )}
+    </p>
   );
 }
