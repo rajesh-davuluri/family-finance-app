@@ -88,10 +88,17 @@ export default function ImportPage() {
 
   const [fileName, setFileName] = useState("");
   const [history, setHistory] = useState<ImportRecord[] | null>(null);
+  const [historyError, setHistoryError] = useState(false);
 
   async function loadHistory() {
-    const res = await fetch("/api/imports");
-    if (res.ok) setHistory(await res.json());
+    try {
+      const res = await fetch("/api/imports");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setHistory(await res.json());
+      setHistoryError(false);
+    } catch {
+      setHistoryError(true);
+    }
   }
 
   useEffect(() => {
@@ -508,7 +515,7 @@ export default function ImportPage() {
         </div>
       )}
 
-      {step === "upload" && <ImportHistory history={history} />}
+      {step === "upload" && <ImportHistory history={history} failed={historyError} />}
     </div>
   );
 }
@@ -523,11 +530,16 @@ function formatDateTime(iso: string) {
   });
 }
 
-function ImportHistory({ history }: { history: ImportRecord[] | null }) {
+function ImportHistory({ history, failed }: { history: ImportRecord[] | null; failed: boolean }) {
   return (
     <div className="space-y-2">
       <h2 className="text-sm font-medium text-gray-700">Import history</h2>
-      {history === null ? (
+      {failed && history === null ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          Couldn&apos;t load import history. If this was just deployed, the database may still need its update
+          (<code>npx prisma migrate deploy</code>).
+        </p>
+      ) : history === null ? (
         <p className="text-sm text-gray-400">Loading...</p>
       ) : history.length === 0 ? (
         <p className="rounded-lg border bg-white p-4 text-sm text-gray-500">
