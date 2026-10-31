@@ -1,17 +1,28 @@
 // Shape of GET /api/transactions/last-activity, shared by the Dashboard
 // summary line and the Import page's per-account list.
+export type ActivityTransaction = {
+  createdAt: string;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  categoryName: string;
+  direction: "INCOME" | "EXPENSE";
+  instrumentName: string;
+  createdByName: string;
+  // How it got into the app -- typed in, imported from a statement, or
+  // generated from a recurring template.
+  source: "MANUAL" | "IMPORTED" | "RECURRING";
+};
+
+export const SOURCE_LABELS: Record<ActivityTransaction["source"], string> = {
+  MANUAL: "added manually",
+  IMPORTED: "imported",
+  RECURRING: "from recurring",
+};
+
 export type LastActivity = {
-  lastAdded: {
-    createdAt: string;
-    date: string;
-    amount: number;
-    currency: string;
-    notes: string | null;
-    categoryName: string;
-    direction: "INCOME" | "EXPENSE";
-    instrumentName: string;
-    createdByName: string;
-  } | null;
+  lastAdded: ActivityTransaction | null;
   instruments: {
     id: string;
     name: string;
@@ -20,6 +31,8 @@ export type LastActivity = {
     transactionCount: number;
     latestTransactionDate: string | null;
     lastAddedAt: string | null;
+    // Latest by transaction date (ties broken by most recently added).
+    latestTransaction: ActivityTransaction | null;
   }[];
 };
 
