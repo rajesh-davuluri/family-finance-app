@@ -27,14 +27,27 @@ export async function GET() {
   // Current balance is never stored -- compute it fresh from opening
   // balance + transactions since that date, same principle as debt
   // balances and recurring-template math elsewhere in the app.
+  //
+  // Credit cards without an opening balance fall back to the sum of every
+  // transaction and transfer on the card (i.e. assuming it started at zero),
+  // flagged as balanceFromTransactionsOnly so the UI can say it may be
+  // missing activity from before the app's records begin. Other instrument
+  // types have no such fallback -- a bank account's starting money can't be
+  // guessed.
   const withBalance = await Promise.all(
-    instruments.map(async (i) => ({
-      ...i,
-      currentBalance:
-        i.openingBalance !== null && i.openingBalanceDate !== null
-          ? await computeInstrumentBalance(i.id, Number(i.openingBalance), i.openingBalanceDate)
-          : null,
-    }))
+    instruments.map(async (i) => {
+      const hasOpening = i.openingBalance !== null && i.openingBalanceDate !== null;
+      const fallback = !hasOpening && i.type === "CREDIT_CARD";
+      return {
+        ...i,
+        currentBalance: hasOpening
+          ? await computeInstrumentBalance(i.id, Number(i.openingBalance), i.openingBalanceDate!)
+          : fallback
+            ? await computeInstrumentBalance(i.id, 0, new Date(0))
+            : null,
+        balanceFromTransactionsOnly: fallback,
+      };
+    })
   );
 
   return NextResponse.json(withBalance);

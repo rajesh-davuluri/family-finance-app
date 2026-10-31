@@ -14,6 +14,9 @@ type Instrument = {
   openingBalance: string | null;
   openingBalanceDate: string | null;
   currentBalance: number | null;
+  // True when a credit card has no starting balance and currentBalance is
+  // just the sum of its transactions and transfers in the app.
+  balanceFromTransactionsOnly: boolean;
   creditLimit: string | null;
 };
 
@@ -301,7 +304,9 @@ export default function InstrumentsPage() {
                           ? `${i.currentBalance <= 0 ? "Owed" : "Credit"} ${i.currency} ${Math.abs(i.currentBalance).toFixed(2)}`
                           : `${i.currency} ${i.currentBalance.toFixed(2)}`}
                       </span>
-                      <span className="ml-1 text-xs text-gray-400">(edit)</span>
+                      <span className="ml-1 text-xs text-gray-400">
+                        {i.balanceFromTransactionsOnly ? "(from transactions · set starting balance)" : "(edit)"}
+                      </span>
                     </button>
                   ) : (
                     <button onClick={() => startEditingBalance(i)} className="text-xs text-brand-600 hover:underline">
@@ -596,10 +601,18 @@ function CreditCardLimits({ cards, onChanged }: { cards: Instrument[]; onChanged
             ) : limit === null ? (
               <p className="text-sm text-gray-600">
                 Used <span className="font-medium">{money(card.currency, owed)}</span>
-                <span className="text-xs text-gray-400"> — set a limit to see what&apos;s remaining.</span>
+                <span className="text-xs text-gray-400">
+                  {card.balanceFromTransactionsOnly && " (from transactions)"} — set a limit to see what&apos;s remaining.
+                </span>
               </p>
             ) : (
               <>
+                {card.balanceFromTransactionsOnly && (
+                  <p className="text-xs text-gray-400">
+                    Based on transactions in the app — set a starting balance below if it doesn&apos;t match your
+                    statement.
+                  </p>
+                )}
                 <div className="h-2 overflow-hidden rounded-full bg-ink-100">
                   <div
                     className={`h-full ${utilizationColor(pct!)}`}
