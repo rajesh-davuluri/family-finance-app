@@ -8,7 +8,7 @@ export async function GET() {
 
   const household = await prisma.household.findUnique({
     where: { id: user.householdId },
-    include: { users: { select: { id: true, name: true, email: true, role: true, mfaEnabled: true } } },
+    include: { users: { select: { id: true, name: true, email: true, role: true, mfaEnabled: true, lastLoginAt: true } } },
   });
   return NextResponse.json(household);
 }

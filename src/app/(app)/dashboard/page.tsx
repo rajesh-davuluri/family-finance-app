@@ -142,6 +142,9 @@ export default function DashboardPage() {
   const [upcomingBills, setUpcomingBills] = useState<UpcomingBill[] | null>(null);
   const [activity, setActivity] = useState<ActivityItem[] | null>(null);
   const [lastActivity, setLastActivity] = useState<LastActivity | null>(null);
+  const [me, setMe] = useState<{ name: string; lastLoginAt: string | null; previousLoginAt: string | null } | null>(
+    null
+  );
 
   function loadSummary() {
     setLoading(true);
@@ -193,6 +196,11 @@ export default function DashboardPage() {
       .then(setActivity);
 
     loadLastActivity();
+
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setMe)
+      .catch(() => setMe(null));
   }, []);
 
   function loadLastActivity() {
@@ -269,7 +277,19 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Dashboard</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          {me && (
+            <p className="text-xs text-gray-500">
+              {/* lastLoginAt is this session, so "last login" means the one before it. */}
+              {me.previousLoginAt
+                ? `Welcome back, ${me.name} — your last login was ${formatDateTime(me.previousLoginAt)}.`
+                : me.lastLoginAt
+                  ? `Welcome, ${me.name} — this is your first recorded login.`
+                  : `Welcome, ${me.name}.`}
+            </p>
+          )}
+        </div>
         <button
           onClick={() => setShowAddModal(true)}
           className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"

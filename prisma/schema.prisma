@@ -53,6 +53,12 @@ model User {
   mfaEnabled        Boolean @default(false)
   mfaSecretEncrypted String? @db.NVarChar(Max)
 
+  // Set on each successful sign-in: lastLoginAt is the current/most recent
+  // one, previousLoginAt the one before it (what "your last login was"
+  // shows, since lastLoginAt is normally the session you're in).
+  lastLoginAt     DateTime?
+  previousLoginAt DateTime?
+
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

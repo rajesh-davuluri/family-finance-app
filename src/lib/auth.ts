@@ -62,6 +62,16 @@ export const authOptions: NextAuthOptions = {
           }
         }
 
+        // Record the sign-in. A failure here shouldn't block logging in.
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { previousLoginAt: user.lastLoginAt, lastLoginAt: new Date() },
+          });
+        } catch (err) {
+          console.error("Couldn't record login time", err);
+        }
+
         return {
           id: user.id,
           email: user.email,
