@@ -82,6 +82,10 @@ model PaymentInstrument {
   openingBalance     Decimal?  @db.Decimal(12, 2)
   openingBalanceDate DateTime?
 
+  // Credit cards only: the card's credit limit. Utilization is derived from
+  // the current balance (negative = owed), never stored.
+  creditLimit Decimal? @db.Decimal(12, 2)
+
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

@@ -9,6 +9,7 @@ const updateSchema = z.object({
   archived: z.boolean().optional(),
   openingBalance: z.number().nullable().optional(),
   openingBalanceDate: z.string().nullable().optional(),
+  creditLimit: z.number().positive().nullable().optional(),
 });
 
 async function assertOwnership(instrumentId: string, householdId: string) {
@@ -28,6 +29,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = updateSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const { openingBalanceDate, ...rest } = parsed.data;
+  if (rest.creditLimit !== undefined && rest.creditLimit !== null && existing.type !== "CREDIT_CARD") {
+    return NextResponse.json({ error: "Only credit cards have a credit limit." }, { status: 400 });
+  }
 
   const updated = await prisma.paymentInstrument.update({
     where: { id },
