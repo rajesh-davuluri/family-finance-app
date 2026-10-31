@@ -12,6 +12,7 @@ const createSchema = z.object({
   currency: Currency,
   openingBalance: z.number().optional(),
   openingBalanceDate: z.string().optional(), // required together with openingBalance -- validated below
+  creditLimit: z.number().positive().optional(), // credit cards only
 });
 
 export async function GET() {
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
       householdId: user.householdId,
       openingBalance: data.openingBalance,
       openingBalanceDate: data.openingBalanceDate ? new Date(data.openingBalanceDate) : undefined,
+      creditLimit: data.type === "CREDIT_CARD" ? data.creditLimit : undefined,
     },
   });
   return NextResponse.json(instrument, { status: 201 });

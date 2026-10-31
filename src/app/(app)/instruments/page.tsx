@@ -14,6 +14,7 @@ type Instrument = {
   openingBalance: string | null;
   openingBalanceDate: string | null;
   currentBalance: number | null;
+  creditLimit: string | null;
 };
 
 type Transfer = {
@@ -38,7 +39,7 @@ export default function InstrumentsPage() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD" });
+  const [form, setForm] = useState({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD", creditLimit: "" });
   const [submitting, setSubmitting] = useState(false);
 
   // Which instrument's balance is currently being edited, if any.
@@ -84,7 +85,10 @@ export default function InstrumentsPage() {
     const res = await fetch("/api/instruments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        creditLimit: form.type === "CREDIT_CARD" && form.creditLimit ? parseFloat(form.creditLimit) : undefined,
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -92,7 +96,7 @@ export default function InstrumentsPage() {
       setError(typeof body.error === "string" ? body.error : "Couldn't add that instrument.");
       return;
     }
-    setForm({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD" });
+    setForm({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD", creditLimit: "" });
     load();
   }
 
@@ -115,21 +119,26 @@ export default function InstrumentsPage() {
     load();
   }
 
+  // Balances are signed (spending on a card makes it negative), but people
+  // think of a card's balance as the amount they owe -- so for credit cards
+  // the editor takes "amount owed" as a positive number and flips the sign.
   function startEditingBalance(i: Instrument) {
+    const sign = i.type === "CREDIT_CARD" ? -1 : 1;
     setBalanceForm({
-      amount: i.openingBalance ? String(i.openingBalance) : "",
+      amount: i.openingBalance ? String(sign * Number(i.openingBalance)) : "",
       date: i.openingBalanceDate ? i.openingBalanceDate.slice(0, 10) : getTodayLocal(),
     });
     setEditingBalanceId(i.id);
   }
 
-  async function saveBalance(id: string) {
+  async function saveBalance(i: Instrument) {
     const amount = parseFloat(balanceForm.amount);
     if (isNaN(amount)) return;
-    await fetch(`/api/instruments/${id}`, {
+    const sign = i.type === "CREDIT_CARD" ? -1 : 1;
+    await fetch(`/api/instruments/${i.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ openingBalance: amount, openingBalanceDate: balanceForm.date }),
+      body: JSON.stringify({ openingBalance: sign * amount, openingBalanceDate: balanceForm.date }),
     });
     setEditingBalanceId(null);
     load();
@@ -212,6 +221,17 @@ export default function InstrumentsPage() {
             </option>
           ))}
         </select>
+        {form.type === "CREDIT_CARD" && (
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            placeholder="Credit limit (optional)"
+            value={form.creditLimit}
+            onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
+            className="rounded-md border px-3 py-2 text-sm sm:col-span-5"
+          />
+        )}
         <button
           type="submit"
           disabled={submitting}
@@ -221,6 +241,11 @@ export default function InstrumentsPage() {
         </button>
         {error && <p className="text-sm text-red-600 sm:col-span-5">{error}</p>}
       </form>
+
+      <CreditCardLimits
+        cards={activeInstruments.filter((i) => i.type === "CREDIT_CARD")}
+        onChanged={load}
+      />
 
       <div className="rounded-lg border bg-white">
         <table className="w-full text-sm">
@@ -253,16 +278,16 @@ export default function InstrumentsPage() {
                         value={balanceForm.amount}
                         onChange={(e) => setBalanceForm({ ...balanceForm, amount: e.target.value })}
                         className="w-24 rounded border px-2 py-1 text-xs"
-                        placeholder="Amount"
+                        placeholder={i.type === "CREDIT_CARD" ? "Owed" : "Amount"}
                       />
-                      <span className="text-xs text-gray-400">as of</span>
+                      <span className="text-xs text-gray-400">{i.type === "CREDIT_CARD" ? "owed as of" : "as of"}</span>
                       <input
                         type="date"
                         value={balanceForm.date}
                         onChange={(e) => setBalanceForm({ ...balanceForm, date: e.target.value })}
                         className="rounded border px-2 py-1 text-xs"
                       />
-                      <button onClick={() => saveBalance(i.id)} className="text-xs text-brand-600 hover:underline">
+                      <button onClick={() => saveBalance(i)} className="text-xs text-brand-600 hover:underline">
                         Save
                       </button>
                       <button onClick={() => setEditingBalanceId(null)} className="text-xs text-gray-400 hover:underline">
@@ -272,7 +297,9 @@ export default function InstrumentsPage() {
                   ) : i.currentBalance !== null ? (
                     <button onClick={() => startEditingBalance(i)} className="text-left hover:underline">
                       <span className="font-medium">
-                        {i.currency} {i.currentBalance.toFixed(2)}
+                        {i.type === "CREDIT_CARD"
+                          ? `${i.currentBalance <= 0 ? "Owed" : "Credit"} ${i.currency} ${Math.abs(i.currentBalance).toFixed(2)}`
+                          : `${i.currency} ${i.currentBalance.toFixed(2)}`}
                       </span>
                       <span className="ml-1 text-xs text-gray-400">(edit)</span>
                     </button>
@@ -442,6 +469,179 @@ export default function InstrumentsPage() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function money(currency: string, n: number) {
+  return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Utilization bands match the usual credit-score guidance: under 30% is
+// healthy, 30-70% is worth watching, above 70% is high.
+function utilizationColor(pct: number) {
+  if (pct < 30) return "bg-income-500";
+  if (pct < 70) return "bg-brand-400";
+  return "bg-expense-500";
+}
+
+function CreditCardLimits({ cards, onChanged }: { cards: Instrument[]; onChanged: () => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [limitInput, setLimitInput] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  if (cards.length === 0) return null;
+
+  async function saveLimit(id: string) {
+    const value = limitInput.trim() === "" ? null : parseFloat(limitInput);
+    if (value !== null && (isNaN(value) || value <= 0)) {
+      setSaveError("Enter a limit greater than zero, or leave it empty to clear it.");
+      return;
+    }
+    const res = await fetch(`/api/instruments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creditLimit: value }),
+    });
+    if (!res.ok) {
+      setSaveError("Couldn't save that limit.");
+      return;
+    }
+    setSaveError(null);
+    setEditingId(null);
+    onChanged();
+  }
+
+  // Owed = the negative part of the balance; a positive balance is a credit
+  // (e.g. a refund or overpayment), which uses none of the limit.
+  const rows = cards.map((c) => {
+    const limit = c.creditLimit !== null ? Number(c.creditLimit) : null;
+    const owed = c.currentBalance !== null ? Math.max(0, -c.currentBalance) : null;
+    const available = limit !== null && owed !== null ? limit - owed : null;
+    const pct = limit !== null && owed !== null && limit > 0 ? (owed / limit) * 100 : null;
+    return { card: c, limit, owed, available, pct };
+  });
+
+  // Totals only make sense within one currency.
+  const totals = new Map<string, { limit: number; owed: number }>();
+  for (const r of rows) {
+    if (r.limit === null || r.owed === null) continue;
+    const t = totals.get(r.card.currency) ?? { limit: 0, owed: 0 };
+    t.limit += r.limit;
+    t.owed += r.owed;
+    totals.set(r.card.currency, t);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold">Credit cards</h2>
+        <p className="text-sm text-gray-500">
+          Limit, how much is used (what you currently owe), and what&apos;s still available on each card.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {rows.map(({ card, limit, owed, available, pct }) => (
+          <div key={card.id} className="space-y-2 rounded-lg border bg-white p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="font-medium">
+                {card.name}
+                {card.last4 && <span className="text-gray-400"> ({card.last4})</span>}
+              </span>
+              {editingId === card.id ? (
+                <span className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    autoFocus
+                    value={limitInput}
+                    onChange={(e) => setLimitInput(e.target.value)}
+                    className="w-28 rounded border px-2 py-1 text-xs"
+                    placeholder="Limit"
+                  />
+                  <button onClick={() => saveLimit(card.id)} className="text-xs text-brand-600 hover:underline">
+                    Save
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingId(null);
+                      setSaveError(null);
+                    }}
+                    className="text-xs text-gray-400 hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    setLimitInput(limit !== null ? String(limit) : "");
+                    setSaveError(null);
+                    setEditingId(card.id);
+                  }}
+                  className="text-xs text-brand-600 hover:underline"
+                >
+                  {limit !== null ? `Limit ${money(card.currency, limit)} (edit)` : "Set limit"}
+                </button>
+              )}
+            </div>
+            {editingId === card.id && saveError && <p className="text-xs text-red-600">{saveError}</p>}
+
+            {owed === null ? (
+              <p className="text-xs text-gray-400">
+                Set this card&apos;s balance (amount owed) in the table below to see how much is used.
+              </p>
+            ) : limit === null ? (
+              <p className="text-sm text-gray-600">
+                Used <span className="font-medium">{money(card.currency, owed)}</span>
+                <span className="text-xs text-gray-400"> — set a limit to see what&apos;s remaining.</span>
+              </p>
+            ) : (
+              <>
+                <div className="h-2 overflow-hidden rounded-full bg-ink-100">
+                  <div
+                    className={`h-full ${utilizationColor(pct!)}`}
+                    style={{ width: `${Math.min(100, pct!)}%` }}
+                  />
+                </div>
+                <div className="grid grid-cols-3 text-sm">
+                  <div>
+                    <div className="text-xs text-gray-500">Used</div>
+                    <div className="font-medium">{money(card.currency, owed)}</div>
+                    <div className="text-xs text-gray-400">{pct!.toFixed(0)}% of limit</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">{available! < 0 ? "Over limit by" : "Remaining"}</div>
+                    <div className={`font-medium ${available! < 0 ? "text-expense-600" : "text-income-600"}`}>
+                      {money(card.currency, Math.abs(available!))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Limit</div>
+                    <div className="font-medium">{money(card.currency, limit)}</div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {totals.size > 0 && (
+        <div className="rounded-lg border bg-white p-4 text-sm">
+          {Array.from(totals.entries()).map(([currency, t]) => {
+            const pct = t.limit > 0 ? (t.owed / t.limit) * 100 : 0;
+            return (
+              <p key={currency}>
+                <span className="font-medium">All cards ({currency}):</span> used {money(currency, t.owed)} of{" "}
+                {money(currency, t.limit)} ({pct.toFixed(0)}%) — {money(currency, t.limit - t.owed)} remaining
+              </p>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
