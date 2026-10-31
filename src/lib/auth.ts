@@ -26,9 +26,18 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email.toLowerCase() },
-        });
+        // A database outage (e.g. a paused Azure SQL instance or a firewall
+        // change) used to surface as "Incorrect email or password" -- report
+        // it separately so the login page can say the server is the problem.
+        let user;
+        try {
+          user = await prisma.user.findUnique({
+            where: { email: credentials.email.toLowerCase() },
+          });
+        } catch (err) {
+          console.error("Login failed: couldn't query the database", err);
+          throw new Error("SERVER_UNAVAILABLE");
+        }
         if (!user) return null;
 
         const validPassword = await bcrypt.compare(credentials.password, user.passwordHash);
@@ -39,7 +48,14 @@ export const authOptions: NextAuthOptions = {
             // Shouldn't happen, but fail closed rather than skip MFA.
             throw new Error("MFA_REQUIRED");
           }
-          const secret = decryptField(user.mfaSecretEncrypted);
+          let secret;
+          try {
+            secret = decryptField(user.mfaSecretEncrypted);
+          } catch (err) {
+            // Usually FIELD_ENCRYPTION_KEY is missing or was changed.
+            console.error("Login failed: couldn't decrypt MFA secret", err);
+            throw new Error("SERVER_UNAVAILABLE");
+          }
           const validToken = credentials.totp && authenticator.verify({ token: credentials.totp, secret });
           if (!validToken) {
             throw new Error("MFA_REQUIRED");
