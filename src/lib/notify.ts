@@ -19,3 +19,17 @@ export async function notifyHousehold(householdId: string, actingUserId: string,
     console.error("notifyHousehold failed:", err);
   }
 }
+
+// Notifies EVERY member of the household -- for things no one person did,
+// like a transaction added from a forwarded bank email. Best-effort, as above.
+export async function notifyWholeHousehold(householdId: string, message: string) {
+  try {
+    const members = await prisma.user.findMany({ where: { householdId }, select: { id: true } });
+    if (members.length === 0) return;
+    await prisma.notification.createMany({
+      data: members.map((u) => ({ householdId, userId: u.id, message })),
+    });
+  } catch (err) {
+    console.error("notifyWholeHousehold failed:", err);
+  }
+}
