@@ -41,11 +41,18 @@ type PreviewRow = {
   date: string; // normalized YYYY-MM-DD
   amount: number;
   categoryId: string;
+  // Category guessed from past transactions with the same merchant, if any.
+  // The row shows as "auto" while categoryId still equals it.
+  suggestedCategoryId: string | null;
   include: boolean;
   // Existing transaction with the same date + amount, found when the preview
   // was built. Only shown while the row's date/amount still match it.
   match: ExistingMatch | null;
 };
+
+function isAutoCategorized(r: PreviewRow) {
+  return r.suggestedCategoryId !== null && r.categoryId === r.suggestedCategoryId;
+}
 
 function isDuplicate(r: PreviewRow) {
   return !!r.match && r.match.date === r.date && Math.round(r.match.amount * 100) === Math.round(r.amount * 100);
@@ -175,6 +182,20 @@ export default function ImportPage() {
     return body.matches;
   }
 
+  async function suggestCategories(preview: PreviewRow[]): Promise<({ categoryId: string } | null)[] | null> {
+    try {
+      const res = await fetch("/api/transactions/bulk/suggest-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ descriptions: preview.map((r) => r.rawDescription) }),
+      });
+      if (!res.ok) return null;
+      return (await res.json()).suggestions;
+    } catch {
+      return null;
+    }
+  }
+
   async function proceedToPreview() {
     if (!columnMap.date || !columnMap.description || !columnMap.amount) {
       setError("Map all three columns before continuing.");
@@ -193,6 +214,7 @@ export default function ImportPage() {
         date: normalizeDate(r[columnMap.date] ?? ""),
         amount,
         categoryId: defaultCategoryId,
+        suggestedCategoryId: null,
         include: amount > 0,
         match: null,
       };
@@ -200,9 +222,17 @@ export default function ImportPage() {
 
     // Before anything is inserted, look for transactions already in the app
     // with the same date and amount, and leave those rows unchecked.
+    // Alongside that, fill in categories learned from past transactions.
     setChecking(true);
-    const matches = await findExistingMatches(preview);
+    const [matches, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
     setChecking(false);
+    const knownCategoryIds = new Set(categories.map((c) => c.id));
+    suggestions?.forEach((sug, i) => {
+      if (sug && knownCategoryIds.has(sug.categoryId)) {
+        preview[i].categoryId = sug.categoryId;
+        preview[i].suggestedCategoryId = sug.categoryId;
+      }
+    });
     if (matches) {
       preview.forEach((r, i) => {
         r.match = matches[i] ?? null;
@@ -215,8 +245,10 @@ export default function ImportPage() {
     setStep("preview");
   }
 
-  function applyBulkCategory() {
-    setRows((rs) => rs.map((r) => ({ ...r, categoryId: bulkCategoryId })));
+  // By default only rows without an automatic suggestion are changed, so
+  // picking a catch-all category doesn't wipe out the learned ones.
+  function applyBulkCategory(includeAuto: boolean) {
+    setRows((rs) => rs.map((r) => (includeAuto || !isAutoCategorized(r) ? { ...r, categoryId: bulkCategoryId } : r)));
   }
 
   function updateRow(index: number, patch: Partial<PreviewRow>) {
@@ -265,6 +297,7 @@ export default function ImportPage() {
   }
 
   const duplicateCount = rows.filter(isDuplicate).length;
+  const autoCount = rows.filter(isAutoCategorized).length;
   const lastImport = history?.[0];
   // Earlier imports of a file with the same name -- most likely the same
   // statement being brought in a second time.
@@ -389,7 +422,7 @@ export default function ImportPage() {
               disabled={checking}
               className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
-              {checking ? "Checking for existing transactions..." : `Preview ${rawRows.length} row${rawRows.length === 1 ? "" : "s"}`}
+              {checking ? "Checking existing transactions & categories..." : `Preview ${rawRows.length} row${rawRows.length === 1 ? "" : "s"}`}
             </button>
           </div>
         </div>
@@ -422,8 +455,25 @@ export default function ImportPage() {
             )
           )}
 
+          {autoCount > 0 ? (
+            <p className="rounded-lg border border-brand-300 bg-brand-50 p-3 text-sm text-ink-800">
+              <span className="font-medium">
+                {autoCount} of {rows.length} row{rows.length === 1 ? "" : "s"} categorized automatically
+              </span>{" "}
+              from your past transactions (marked <AutoBadge />). Check the other {rows.length - autoCount} — they use the
+              category below.
+            </p>
+          ) : (
+            rows.length > 0 && (
+              <p className="rounded-lg border bg-white p-3 text-sm text-gray-500">
+                No rows matched merchants from your past transactions yet — pick categories below. Future imports will
+                learn from what you choose here.
+              </p>
+            )
+          )}
+
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white p-4">
-            <span className="text-sm text-gray-500">Apply category to all rows:</span>
+            <span className="text-sm text-gray-500">Category for rows without a suggestion:</span>
             <select
               value={bulkCategoryId}
               onChange={(e) => setBulkCategoryId(e.target.value)}
@@ -435,8 +485,14 @@ export default function ImportPage() {
                 </option>
               ))}
             </select>
-            <button onClick={applyBulkCategory} className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50">
-              Apply to all
+            <button onClick={() => applyBulkCategory(false)} className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50">
+              Apply to uncategorized rows
+            </button>
+            <button
+              onClick={() => applyBulkCategory(true)}
+              className="rounded-md px-3 py-1.5 text-xs text-gray-500 hover:underline"
+            >
+              Apply to all rows
             </button>
           </div>
 
@@ -493,6 +549,11 @@ export default function ImportPage() {
                           </option>
                         ))}
                       </select>
+                      {isAutoCategorized(r) && (
+                        <span className="ml-1">
+                          <AutoBadge />
+                        </span>
+                      )}
                     </td>
                     <td className="p-2 text-xs">
                       {dup && r.match ? (
@@ -660,5 +721,16 @@ function RecordsUpTo({ instruments }: { instruments: LastActivity["instruments"]
         </table>
       </div>
     </div>
+  );
+}
+
+function AutoBadge() {
+  return (
+    <span
+      className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-brand-700"
+      title="Category learned from your past transactions with this merchant"
+    >
+      auto
+    </span>
   );
 }
