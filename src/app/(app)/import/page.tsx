@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate } from "@/lib/formatDate";
@@ -17,6 +17,20 @@ type ExistingMatch = {
   categoryName: string;
   instrumentName: string;
   sameInstrument: boolean;
+};
+
+type ImportRecord = {
+  id: string;
+  fileName: string;
+  currency: string;
+  rowsInFile: number;
+  importedCount: number;
+  duplicateCount: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  instrumentName: string;
+  createdByName: string;
+  createdAt: string;
 };
 
 type PreviewRow = {
@@ -72,6 +86,18 @@ export default function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
+  const [fileName, setFileName] = useState("");
+  const [history, setHistory] = useState<ImportRecord[] | null>(null);
+
+  async function loadHistory() {
+    const res = await fetch("/api/imports");
+    if (res.ok) setHistory(await res.json());
+  }
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
   async function ensureOptionsLoaded() {
     if (loaded) return;
     const [instRes, catRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/categories")]);
@@ -89,6 +115,8 @@ export default function ImportPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null);
+    setResultMessage(null);
+    setFileName(file.name);
     await ensureOptionsLoaded();
 
     Papa.parse<Record<string, string>>(file, {
@@ -179,6 +207,7 @@ export default function ImportPage() {
     setError(null);
     setSubmitting(true);
     const included = rows.filter((r) => r.include);
+    const dates = rows.map((r) => r.date).sort();
     const res = await fetch("/api/transactions/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -191,6 +220,13 @@ export default function ImportPage() {
           categoryId: r.categoryId,
           notes: r.rawDescription || undefined,
         })),
+        file: {
+          name: fileName || "Unnamed file",
+          rowsInFile: rows.length,
+          duplicateCount: rows.filter(isDuplicate).length,
+          periodStart: dates[0],
+          periodEnd: dates[dates.length - 1],
+        },
       }),
     });
     setSubmitting(false);
@@ -204,9 +240,16 @@ export default function ImportPage() {
     setStep("upload");
     setRawRows([]);
     setRows([]);
+    loadHistory();
   }
 
   const duplicateCount = rows.filter(isDuplicate).length;
+  const lastImport = history?.[0];
+  // Earlier imports of a file with the same name -- most likely the same
+  // statement being brought in a second time.
+  const sameFileImports = fileName
+    ? (history ?? []).filter((h) => h.fileName.toLowerCase() === fileName.toLowerCase())
+    : [];
 
   const noSetupYet = loaded && (instruments.length === 0 || categories.length === 0);
 
@@ -224,6 +267,28 @@ export default function ImportPage() {
       {noSetupYet && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           You need at least one category and one payment instrument before importing — set those up first.
+        </div>
+      )}
+
+      {step === "upload" && lastImport && (
+        <p className="rounded-lg border bg-white p-3 text-sm text-gray-600">
+          <span className="font-medium text-ink-900">Last import:</span> {formatDateTime(lastImport.createdAt)} —{" "}
+          <span className="font-medium">{lastImport.fileName}</span> into {lastImport.instrumentName} (
+          {lastImport.importedCount} transaction{lastImport.importedCount === 1 ? "" : "s"}
+          {lastImport.periodStart && lastImport.periodEnd && (
+            <>, covering {formatDate(lastImport.periodStart)} – {formatDate(lastImport.periodEnd)}</>
+          )}
+          )
+        </p>
+      )}
+
+      {step !== "upload" && sameFileImports.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          You&apos;ve imported a file named <span className="font-medium">{fileName}</span> before —{" "}
+          {sameFileImports
+            .map((h) => `${formatDateTime(h.createdAt)} into ${h.instrumentName} (${h.importedCount} transactions)`)
+            .join("; ")}
+          . Make sure this isn&apos;t the same statement again.
         </div>
       )}
 
@@ -440,6 +505,75 @@ export default function ImportPage() {
               {submitting ? "Importing..." : `Import ${rows.filter((r) => r.include).length} transaction(s)`}
             </button>
           </div>
+        </div>
+      )}
+
+      {step === "upload" && <ImportHistory history={history} />}
+    </div>
+  );
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function ImportHistory({ history }: { history: ImportRecord[] | null }) {
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-medium text-gray-700">Import history</h2>
+      {history === null ? (
+        <p className="text-sm text-gray-400">Loading...</p>
+      ) : history.length === 0 ? (
+        <p className="rounded-lg border bg-white p-4 text-sm text-gray-500">
+          No imports yet — files you import will be listed here.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-gray-500">
+                <th className="p-2">Imported on</th>
+                <th className="p-2">File</th>
+                <th className="p-2">Account</th>
+                <th className="p-2">Statement period</th>
+                <th className="p-2 text-right">Imported</th>
+                <th className="p-2 text-right">Skipped</th>
+                <th className="p-2">By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h) => {
+                const skipped = h.rowsInFile - h.importedCount;
+                return (
+                  <tr key={h.id} className="border-b last:border-0">
+                    <td className="whitespace-nowrap p-2 text-gray-600">{formatDateTime(h.createdAt)}</td>
+                    <td className="max-w-xs truncate p-2 font-medium" title={h.fileName}>
+                      {h.fileName}
+                    </td>
+                    <td className="p-2 text-gray-600">{h.instrumentName}</td>
+                    <td className="whitespace-nowrap p-2 text-gray-600">
+                      {h.periodStart && h.periodEnd ? `${formatDate(h.periodStart)} – ${formatDate(h.periodEnd)}` : "—"}
+                    </td>
+                    <td className="p-2 text-right">{h.importedCount}</td>
+                    <td
+                      className="p-2 text-right text-gray-500"
+                      title={h.duplicateCount ? `${h.duplicateCount} already in the app` : undefined}
+                    >
+                      {skipped}
+                      {h.duplicateCount > 0 && <span className="text-xs text-amber-700"> ({h.duplicateCount} dup.)</span>}
+                    </td>
+                    <td className="p-2 text-gray-600">{h.createdByName}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
