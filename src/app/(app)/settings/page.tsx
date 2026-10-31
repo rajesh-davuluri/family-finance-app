@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Analytics } from "@vercel/analytics/next"
+import { GMAIL_LABEL, buildGmailScript } from "@/lib/gmailScript";
 
 export default function SettingsPage() {
   const { data: session } = useSession();
@@ -13,8 +14,9 @@ export default function SettingsPage() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [forwardingAddress, setForwardingAddress] = useState<string | null | undefined>(undefined);
-  const [copied, setCopied] = useState(false);
+  // undefined while loading; token null means INBOUND_EMAIL_SECRET isn't set.
+  const [inbound, setInbound] = useState<{ token: string | null; address: string | null } | undefined>(undefined);
+  const [copied, setCopied] = useState<"script" | "address" | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/mfa/status")
@@ -24,19 +26,20 @@ export default function SettingsPage() {
         setLoading(false);
       });
     fetch("/api/inbound/address")
-      .then((r) => (r.ok ? r.json() : { address: null }))
-      .then((d) => setForwardingAddress(d.address))
-      .catch(() => setForwardingAddress(null));
+      .then((r) => (r.ok ? r.json() : { token: null, address: null }))
+      .then(setInbound)
+      .catch(() => setInbound({ token: null, address: null }));
   }, []);
 
-  async function copyAddress() {
-    if (!forwardingAddress) return;
+  const gmailScript = inbound?.token ? buildGmailScript(window.location.origin, inbound.token) : null;
+
+  async function copy(what: "script" | "address", text: string) {
     try {
-      await navigator.clipboard.writeText(forwardingAddress);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied(null), 2000);
     } catch {
-      // Clipboard blocked -- the address is still selectable on screen.
+      // Clipboard blocked -- the text is still selectable on screen.
     }
   }
 
@@ -97,40 +100,73 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-lg border bg-white p-4">
-        <h2 className="mb-1 text-sm font-medium text-gray-700">Add transactions by email</h2>
+        <h2 className="mb-1 text-sm font-medium text-gray-700">Add transactions from Gmail</h2>
         <p className="mb-3 text-sm text-gray-500">
-          Forward your bank&apos;s card alert emails here and each purchase is added automatically — matched to the
-          card by its last 4 digits and categorized from your past transactions. You&apos;ll get a notification for
-          each one, and for any email that couldn&apos;t be added.
+          A small script in your own Gmail sends your bank&apos;s card alert emails here every 10 minutes, and each
+          purchase is added automatically — matched to the card by its last 4 digits and categorized from your past
+          transactions. You&apos;ll get a notification for each one, and for any alert that couldn&apos;t be added.
         </p>
-        {forwardingAddress === undefined ? (
+        {inbound === undefined ? (
           <p className="text-sm text-gray-400">Loading...</p>
-        ) : forwardingAddress === null ? (
+        ) : !gmailScript ? (
           <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">
-            Not set up on this server yet — the inbound email settings (POSTMARK_INBOUND_ADDRESS, INBOUND_EMAIL_SECRET,
-            INBOUND_WEBHOOK_USER, INBOUND_WEBHOOK_PASSWORD) need to be added in Vercel.
+            Not set up on this server yet — add an <code>INBOUND_EMAIL_SECRET</code> environment variable (any long
+            random string) in Vercel and redeploy.
           </p>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 text-xs">{forwardingAddress}</code>
-              <button onClick={copyAddress} className="rounded-md border px-3 py-1.5 text-xs hover:bg-gray-50">
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
-            <ol className="list-decimal space-y-1 pl-5 text-xs text-gray-500">
+            <ol className="list-decimal space-y-2 pl-5 text-xs text-gray-600">
               <li>
-                In Gmail: Settings → See all settings → Forwarding and POP/IMAP → <em>Add a forwarding address</em>, and
-                paste the address above.
+                <span className="font-medium">Label your alerts.</span> In Gmail, search for one of your bank&apos;s
+                alert emails, open the search options (the sliders icon) → <em>Create filter</em> → tick{" "}
+                <em>Apply the label</em> and choose a new label named <code>{GMAIL_LABEL}</code>. Repeat for each bank.
+                Leave <em>also apply to matching conversations</em> unticked so old alerts aren&apos;t added.
               </li>
-              <li>Gmail sends a confirmation code — it appears in this app&apos;s notifications (the bell). Enter it in Gmail.</li>
               <li>
-                Create a filter (Settings → Filters) for emails from your bank&apos;s alert address, with{" "}
-                <em>Forward it to</em> this address. Only forward card alerts, not all your mail.
+                <span className="font-medium">Add the script.</span> Open{" "}
+                <a href="https://script.google.com/home/projects/create" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                  script.google.com
+                </a>{" "}
+                (signed in to that Gmail), delete the sample code, paste the script below, and click Save.
+              </li>
+              <li>
+                <span className="font-medium">Switch it on.</span> In the toolbar, choose the <code>setup</code>{" "}
+                function and click <em>Run</em>. Google will say the app isn&apos;t verified — that&apos;s expected for
+                your own script: click <em>Advanced</em> → <em>Go to … (unsafe)</em> → <em>Allow</em>.
               </li>
               <li>Make sure each card&apos;s last 4 digits are set on the Instruments page.</li>
             </ol>
-            <p className="text-xs text-gray-400">Keep this address private — anything sent to it is treated as your household&apos;s.</p>
+
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-700">Your script</span>
+              <button
+                onClick={() => copy("script", gmailScript)}
+                className="rounded-md border px-3 py-1.5 text-xs hover:bg-gray-50"
+              >
+                {copied === "script" ? "Copied" : "Copy script"}
+              </button>
+            </div>
+            <pre className="max-h-48 overflow-auto rounded-md bg-gray-50 p-3 text-[11px] leading-snug">{gmailScript}</pre>
+            <p className="text-xs text-gray-400">
+              Keep the script private — its token lets it add transactions to your household. Other family members
+              can use the same script in their own Gmail. Mail from Outlook or other accounts: auto-forward those
+              alerts to this Gmail.
+            </p>
+
+            {inbound.address && (
+              <div className="border-t pt-3">
+                <p className="mb-1 text-xs text-gray-500">Or forward alerts by email (Postmark) to:</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 text-xs">{inbound.address}</code>
+                  <button
+                    onClick={() => copy("address", inbound.address!)}
+                    className="rounded-md border px-3 py-1.5 text-xs hover:bg-gray-50"
+                  >
+                    {copied === "address" ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
