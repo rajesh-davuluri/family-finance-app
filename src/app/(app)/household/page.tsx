@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { Analytics } from "@vercel/analytics/next";
-type Member = { id: string; name: string; email: string; role: string; mfaEnabled: boolean };
+import { formatDateTime } from "@/lib/lastActivity";
+
+type Member = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  mfaEnabled: boolean;
+  lastLoginAt: string | null;
+};
 type Household = { id: string; name: string; inviteCode: string; users: Member[] };
 
 export default function HouseholdPage() {
@@ -54,6 +63,7 @@ export default function HouseholdPage() {
               <th className="pb-2">Email</th>
               <th className="pb-2">Role</th>
               <th className="pb-2">MFA</th>
+              <th className="pb-2">Last login</th>
             </tr>
           </thead>
           <tbody>
@@ -63,6 +73,7 @@ export default function HouseholdPage() {
                 <td className="py-2 text-gray-500">{u.email}</td>
                 <td className="py-2">{u.role === "ADMIN" ? "Admin" : "Member"}</td>
                 <td className="py-2">{u.mfaEnabled ? "Enabled" : "—"}</td>
+                <td className="py-2 text-gray-500">{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "Not recorded yet"}</td>
               </tr>
             ))}
           </tbody>
