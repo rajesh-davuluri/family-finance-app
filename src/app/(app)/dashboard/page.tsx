@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import { formatDate } from "@/lib/formatDate";
+import { LastActivity, SOURCE_LABELS, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
 type CategorySlice = { id: string; name: string; total: number };
 
@@ -140,6 +141,7 @@ export default function DashboardPage() {
   // month/year selector, loaded once on mount.
   const [upcomingBills, setUpcomingBills] = useState<UpcomingBill[] | null>(null);
   const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+  const [lastActivity, setLastActivity] = useState<LastActivity | null>(null);
 
   function loadSummary() {
     setLoading(true);
@@ -189,12 +191,22 @@ export default function DashboardPage() {
     fetch("/api/activity")
       .then((r) => r.json())
       .then(setActivity);
+
+    loadLastActivity();
   }, []);
+
+  function loadLastActivity() {
+    fetch("/api/transactions/last-activity")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setLastActivity)
+      .catch(() => setLastActivity(null));
+  }
 
   function handleTransactionAdded() {
     setShowAddModal(false);
     loadSummary();
     loadBudgets();
+    loadLastActivity();
     // A new transaction can change whatever breakdown/drill-down was open,
     // so close those rather than show stale figures.
     setExpandedPanel(null);
@@ -265,6 +277,11 @@ export default function DashboardPage() {
           Add Transaction
         </button>
       </div>
+
+      {lastActivity && <LastAddedLine lastActivity={lastActivity} />}
+      {lastActivity && lastActivity.instruments.length > 0 && (
+        <LastTransactionPerAccount instruments={lastActivity.instruments} />
+      )}
 
       <AddTransactionModal open={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={handleTransactionAdded} />
 
@@ -645,6 +662,128 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function LastAddedLine({ lastActivity }: { lastActivity: LastActivity }) {
+  const last = lastActivity.lastAdded;
+  if (!last) {
+    return (
+      <p className="rounded-lg border bg-white p-3 text-sm text-gray-500">
+        No transactions yet — add one or{" "}
+        <a href="/import" className="text-brand-600 hover:underline">
+          import a statement
+        </a>
+        .
+      </p>
+    );
+  }
+  const days = daysSince(last.createdAt);
+  const stale = days >= STALE_AFTER_DAYS;
+  return (
+    <p
+      className={`rounded-lg border p-3 text-sm ${
+        stale ? "border-amber-200 bg-amber-50 text-amber-800" : "bg-white text-gray-600"
+      }`}
+    >
+      <span className="font-medium">Last transaction added:</span> {formatDateTime(last.createdAt)} by{" "}
+      {last.createdByName} — {last.categoryName} ·{" "}
+      <span className={last.direction === "INCOME" ? "text-income-600" : "text-expense-600"}>
+        {last.currency} {last.amount.toFixed(2)}
+      </span>{" "}
+      on {last.instrumentName}, dated {formatDate(last.date)} ({SOURCE_LABELS[last.source]}).
+      {stale && (
+        <>
+          {" "}
+          That was {days} days ago —{" "}
+          <a href="/import" className="font-medium underline">
+            import your latest statements
+          </a>
+          .
+        </>
+      )}
+    </p>
+  );
+}
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  BANK_ACCOUNT: "Bank account",
+  CREDIT_CARD: "Credit card",
+  CASH: "Cash",
+  OTHER: "Other",
+};
+
+// Each account's most recent transaction by date -- manual, imported or
+// recurring alike -- so it's obvious which cards are up to date.
+function LastTransactionPerAccount({ instruments }: { instruments: LastActivity["instruments"] }) {
+  const sorted = [...instruments].sort(
+    (a, b) => Number(b.type === "CREDIT_CARD") - Number(a.type === "CREDIT_CARD") || a.name.localeCompare(b.name)
+  );
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <h2 className="mb-3 text-sm font-medium text-gray-700">Last transaction on each card &amp; account</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs text-gray-500">
+              <th className="py-2 pr-3">Account</th>
+              <th className="py-2 pr-3">Date</th>
+              <th className="py-2 pr-3">Transaction</th>
+              <th className="py-2 pr-3 text-right">Amount</th>
+              <th className="py-2">Added</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((i) => {
+              const t = i.latestTransaction;
+              const stale = t !== null && daysSince(t.date) >= STALE_AFTER_DAYS;
+              return (
+                <tr key={i.id} className="border-b last:border-0 align-top">
+                  <td className="py-2 pr-3">
+                    <span className="font-medium">{i.name}</span>
+                    {i.last4 && <span className="text-gray-400"> ({i.last4})</span>}
+                    <span className="block text-xs text-gray-400">{ACCOUNT_TYPE_LABELS[i.type] ?? i.type}</span>
+                  </td>
+                  {t ? (
+                    <>
+                      <td className={`whitespace-nowrap py-2 pr-3 ${stale ? "text-amber-700" : ""}`}>
+                        {formatDate(t.date)}
+                        <span className="block text-xs text-gray-400">{daysSince(t.date)} days ago</span>
+                      </td>
+                      <td className="max-w-xs py-2 pr-3">
+                        {t.categoryName}
+                        {t.notes && (
+                          <span className="block truncate text-xs text-gray-400" title={t.notes}>
+                            {t.notes}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={`whitespace-nowrap py-2 pr-3 text-right font-medium ${
+                          t.direction === "INCOME" ? "text-income-600" : "text-expense-600"
+                        }`}
+                      >
+                        {t.currency} {t.amount.toFixed(2)}
+                      </td>
+                      <td className="whitespace-nowrap py-2 text-xs text-gray-500">
+                        {formatDateTime(t.createdAt)}
+                        <span className="block text-gray-400">
+                          {SOURCE_LABELS[t.source]} · {t.createdByName}
+                        </span>
+                      </td>
+                    </>
+                  ) : (
+                    <td colSpan={4} className="py-2 text-gray-400">
+                      No transactions yet
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
