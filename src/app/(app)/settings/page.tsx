@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [forwardingAddress, setForwardingAddress] = useState<string | null | undefined>(undefined);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/mfa/status")
@@ -21,7 +23,22 @@ export default function SettingsPage() {
         setMfaEnabled(d.mfaEnabled);
         setLoading(false);
       });
+    fetch("/api/inbound/address")
+      .then((r) => (r.ok ? r.json() : { address: null }))
+      .then((d) => setForwardingAddress(d.address))
+      .catch(() => setForwardingAddress(null));
   }, []);
+
+  async function copyAddress() {
+    if (!forwardingAddress) return;
+    try {
+      await navigator.clipboard.writeText(forwardingAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked -- the address is still selectable on screen.
+    }
+  }
 
   async function startSetup() {
     setBusy(true);
@@ -77,6 +94,45 @@ export default function SettingsPage() {
         <h2 className="mb-1 text-sm font-medium text-gray-700">Account</h2>
         <p className="text-sm text-gray-500">{session?.user?.name}</p>
         <p className="text-sm text-gray-500">{session?.user?.email}</p>
+      </div>
+
+      <div className="rounded-lg border bg-white p-4">
+        <h2 className="mb-1 text-sm font-medium text-gray-700">Add transactions by email</h2>
+        <p className="mb-3 text-sm text-gray-500">
+          Forward your bank&apos;s card alert emails here and each purchase is added automatically — matched to the
+          card by its last 4 digits and categorized from your past transactions. You&apos;ll get a notification for
+          each one, and for any email that couldn&apos;t be added.
+        </p>
+        {forwardingAddress === undefined ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : forwardingAddress === null ? (
+          <p className="rounded-md bg-gray-50 p-3 text-sm text-gray-500">
+            Not set up on this server yet — the inbound email settings (POSTMARK_INBOUND_ADDRESS, INBOUND_EMAIL_SECRET,
+            INBOUND_WEBHOOK_USER, INBOUND_WEBHOOK_PASSWORD) need to be added in Vercel.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 text-xs">{forwardingAddress}</code>
+              <button onClick={copyAddress} className="rounded-md border px-3 py-1.5 text-xs hover:bg-gray-50">
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <ol className="list-decimal space-y-1 pl-5 text-xs text-gray-500">
+              <li>
+                In Gmail: Settings → See all settings → Forwarding and POP/IMAP → <em>Add a forwarding address</em>, and
+                paste the address above.
+              </li>
+              <li>Gmail sends a confirmation code — it appears in this app&apos;s notifications (the bell). Enter it in Gmail.</li>
+              <li>
+                Create a filter (Settings → Filters) for emails from your bank&apos;s alert address, with{" "}
+                <em>Forward it to</em> this address. Only forward card alerts, not all your mail.
+              </li>
+              <li>Make sure each card&apos;s last 4 digits are set on the Instruments page.</li>
+            </ol>
+            <p className="text-xs text-gray-400">Keep this address private — anything sent to it is treated as your household&apos;s.</p>
+          </div>
+        )}
       </div>
 
       <div className="rounded-lg border bg-white p-4">
