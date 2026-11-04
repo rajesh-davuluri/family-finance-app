@@ -5,6 +5,19 @@ import { useSession } from "next-auth/react";
 import { Analytics } from "@vercel/analytics/next"
 import { GMAIL_LABEL, buildGmailScript } from "@/lib/gmailScript";
 
+type TelegramStatus =
+  | { configured: false }
+  | {
+      configured: true;
+      secretUsable: boolean;
+      tokenValid: boolean;
+      botUsername: string | null;
+      connected: boolean;
+      lastError: string | null;
+      linkCode: string | null;
+      linkedChats: number;
+    };
+
 export default function SettingsPage() {
   const { data: session } = useSession();
   const [mfaEnabled, setMfaEnabled] = useState(false);
@@ -17,6 +30,9 @@ export default function SettingsPage() {
   // undefined while loading; token null means INBOUND_EMAIL_SECRET isn't set.
   const [inbound, setInbound] = useState<{ token: string | null; address: string | null } | undefined>(undefined);
   const [copied, setCopied] = useState<"script" | "address" | null>(null);
+  const [telegram, setTelegram] = useState<TelegramStatus | null | undefined>(undefined);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramMessage, setTelegramMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/mfa/status")
@@ -29,7 +45,25 @@ export default function SettingsPage() {
       .then((r) => (r.ok ? r.json() : { token: null, address: null }))
       .then(setInbound)
       .catch(() => setInbound({ token: null, address: null }));
+    loadTelegram();
   }, []);
+
+  function loadTelegram() {
+    fetch("/api/telegram/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setTelegram)
+      .catch(() => setTelegram(null));
+  }
+
+  async function connectTelegram() {
+    setTelegramBusy(true);
+    setTelegramMessage(null);
+    const res = await fetch("/api/telegram/connect", { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    setTelegramBusy(false);
+    setTelegramMessage(res.ok ? "Bot connected." : body.error ?? "Couldn't connect the bot.");
+    loadTelegram();
+  }
 
   const gmailScript = inbound?.token ? buildGmailScript(window.location.origin, inbound.token) : null;
 
@@ -167,6 +201,88 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border bg-white p-4">
+        <h2 className="mb-1 text-sm font-medium text-gray-700">Telegram bot</h2>
+        <p className="mb-3 text-sm text-gray-500">
+          Send purchases to your own Telegram bot — “450 swiggy hdfc”, or paste a bank alert — and add them with one
+          tap after checking the card and category.
+        </p>
+        {telegram === undefined ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : telegram === null || !telegram.configured ? (
+          <div className="space-y-1 rounded-md bg-gray-50 p-3 text-xs text-gray-500">
+            <p>Not set up on this server yet:</p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                In Telegram, message <span className="font-medium">@BotFather</span>, send <code>/newbot</code>, pick a
+                name and a username ending in “bot”, and copy the token it gives you.
+              </li>
+              <li>
+                In Vercel → Environment Variables, add <code>TELEGRAM_BOT_TOKEN</code> (that token) and{" "}
+                <code>TELEGRAM_WEBHOOK_SECRET</code> (a long random string of letters and numbers only), then redeploy.
+              </li>
+            </ol>
+          </div>
+        ) : !telegram.tokenValid ? (
+          <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+            Telegram didn&apos;t accept TELEGRAM_BOT_TOKEN — copy it again from @BotFather, update it in Vercel and
+            redeploy.
+          </p>
+        ) : (
+          <div className="space-y-3 text-sm">
+            {!telegram.connected ? (
+              <div className="space-y-2">
+                <p className="text-gray-600">
+                  Step 1 — connect <span className="font-medium">@{telegram.botUsername}</span> to this app (once for
+                  the household):
+                </p>
+                <button
+                  onClick={connectTelegram}
+                  disabled={telegramBusy || !telegram.secretUsable}
+                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {telegramBusy ? "Connecting..." : "Connect bot"}
+                </button>
+                {!telegram.secretUsable && (
+                  <p className="text-xs text-red-600">
+                    TELEGRAM_WEBHOOK_SECRET may only contain letters, numbers, _ and - (at least 16 characters).
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-income-600">
+                ✓ @{telegram.botUsername} is connected.
+                {telegram.lastError && (
+                  <span className="block text-xs text-amber-700">Last delivery problem: {telegram.lastError}</span>
+                )}
+              </p>
+            )}
+            {telegram.connected && telegram.linkCode && (
+              <div className="space-y-2">
+                <p className="text-gray-600">
+                  {telegram.linkedChats > 0
+                    ? `✓ Your Telegram is linked (${telegram.linkedChats} chat${telegram.linkedChats === 1 ? "" : "s"}). To link another device or account:`
+                    : "Step 2 — link your Telegram account:"}
+                </p>
+                <a
+                  href={`https://t.me/${telegram.botUsername}?start=${telegram.linkCode}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
+                >
+                  Open in Telegram
+                </a>
+                <p className="text-xs text-gray-400">
+                  Then tap <em>Start</em>. Or send the bot: <code>/start {telegram.linkCode}</code>. Each family member
+                  links from their own Settings page.
+                </p>
+              </div>
+            )}
+            {telegramMessage && <p className="text-xs text-gray-500">{telegramMessage}</p>}
           </div>
         )}
       </div>

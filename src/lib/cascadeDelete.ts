@@ -20,6 +20,8 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
     prisma.paymentInstrument.deleteMany({ where: { householdId } }),
+    prisma.pendingTelegramTransaction.deleteMany({ where: { householdId } }),
+    prisma.telegramLink.deleteMany({ where: { householdId } }),
     prisma.user.deleteMany({ where: { householdId } }),
     prisma.household.delete({ where: { id: householdId } }),
   ]);
