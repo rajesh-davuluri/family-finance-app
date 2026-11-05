@@ -10,16 +10,36 @@ export type ActivityTransaction = {
   direction: "INCOME" | "EXPENSE";
   instrumentName: string;
   createdByName: string;
-  // How it got into the app -- typed in, imported from a statement, or
-  // generated from a recurring template.
-  source: "MANUAL" | "IMPORTED" | "RECURRING";
+  // How it got into the app -- typed in, imported from a statement (CSV or
+  // PDF), a forwarded/Gmail alert, the Telegram bot, or a recurring template.
+  source: TransactionSource;
 };
 
-export const SOURCE_LABELS: Record<ActivityTransaction["source"], string> = {
+export type TransactionSource = "MANUAL" | "IMPORTED" | "EMAIL" | "TELEGRAM" | "RECURRING";
+
+export const SOURCE_LABELS: Record<TransactionSource, string> = {
   MANUAL: "added manually",
   IMPORTED: "imported",
+  EMAIL: "via email",
+  TELEGRAM: "via Telegram",
   RECURRING: "from recurring",
 };
+
+// How a transaction got into the app, inferred from what's recorded with it
+// (email alerts are saved as "Email: ..." one-row imports). Reads a stored
+// \`source\` too, once transactions carry one.
+export function sourceOf(t: {
+  source?: string | null;
+  recurringTemplateId?: string | null;
+  importBatchId?: string | null;
+  importBatch?: { fileName: string } | null;
+}): TransactionSource {
+  if (t.source && t.source in SOURCE_LABELS) return t.source as TransactionSource;
+  if (t.recurringTemplateId) return "RECURRING";
+  if (t.importBatch?.fileName.startsWith("Email:")) return "EMAIL";
+  if (t.importBatchId) return "IMPORTED";
+  return "MANUAL";
+}
 
 export type LastActivity = {
   lastAdded: ActivityTransaction | null;

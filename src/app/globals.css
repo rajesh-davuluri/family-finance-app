@@ -17,3 +17,10 @@ h3 {
 .font-mono {
   font-variant-numeric: tabular-nums;
 }
+
+/* Printing (Reports → Print / Save as PDF): white paper, no app background. */
+@media print {
+  body {
+    background: white;
+  }
+}

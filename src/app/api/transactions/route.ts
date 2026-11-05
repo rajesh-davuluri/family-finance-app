@@ -34,7 +34,12 @@ export async function GET(req: Request) {
       ...(categoryId ? { categoryId } : {}),
       ...(instrumentId ? { instrumentId } : {}),
     },
-    include: { category: true, instrument: true, createdBy: { select: { name: true } } },
+    include: {
+      category: true,
+      instrument: true,
+      createdBy: { select: { name: true } },
+      importBatch: { select: { fileName: true } },
+    },
     orderBy: { date: "desc" },
     take: limit,
   });

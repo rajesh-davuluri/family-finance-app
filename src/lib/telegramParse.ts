@@ -58,7 +58,7 @@ export function splitEntries(text: string): string[] {
   return entries;
 }
 
-const STOP_WORDS = new Set(["on", "at", "for", "to", "from", "via", "using", "paid", "spent", "card", "the", "a", "rs", "inr"]);
+const STOP_WORDS = new Set(["date", "dated", "on", "at", "for", "to", "from", "via", "using", "paid", "spent", "card", "the", "a", "rs", "inr"]);
 
 function isoDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -75,11 +75,118 @@ function nameWords(name: string) {
   return words(name).filter((w) => w.length >= 3 && !GENERIC_NAME_WORDS.has(w));
 }
 
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function ymd(y: number, m: number, d: number) {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function validDay(y: number, m: number, d: number) {
+  if (m < 1 || m > 12 || d < 1) return false;
+  return d <= new Date(y, m, 0).getDate();
+}
+
+// A date written without a year means the most recent such date -- "Dec 30"
+// sent on Nov 5 is last December's.
+function withYear(month: number, day: number, year: number | null, today: Date): string | null {
+  if (year !== null) return validDay(year, month, day) ? ymd(year, month, day) : null;
+  let y = today.getFullYear();
+  if (!validDay(y, month, day)) return null;
+  if (ymd(y, month, day) > isoDay(today)) y -= 1;
+  return validDay(y, month, day) ? ymd(y, month, day) : null;
+}
+
+function fullYear(y: string | undefined) {
+  if (!y) return null;
+  return y.length === 2 ? 2000 + Number(y) : Number(y);
+}
+
+// Finds the date in a quick note and returns the note without it. Handles
+// today/yesterday, "2 days ago", weekdays ("monday", "last friday"),
+// 2026-11-03, 11/03[/2026] (month-first when asked, unless a part is over
+// 12), 11.03.2026, "Nov 3[, 2026]", "3 Nov", "Nov3", "november 3rd" and a
+// bare ordinal ("on 3rd" = the 3rd of this month, or last month's).
+function extractDate(text: string, today: Date, monthFirst: boolean): { date: string | null; rest: string } {
+  const cut = (m: RegExpMatchArray) => text.replace(m[0], " ");
+  const shift = (days: number) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() - days);
+    return isoDay(d);
+  };
+  // Dates may follow a space or a "date:"/"on:" label.
+  const B = "(?:^|[\\s:(])";
+  const E = "(?=[\\s,.)]|$)";
+
+  let m = text.match(/\byesterday\b/i);
+  if (m) return { date: shift(1), rest: cut(m) };
+  m = text.match(/\btoday\b/i);
+  if (m) return { date: isoDay(today), rest: cut(m) };
+  m = text.match(/\b(\d{1,2})\s+days?\s+ago\b/i);
+  if (m) return { date: shift(Number(m[1])), rest: cut(m) };
+  m = text.match(new RegExp(`\\b(last\\s+)?(${WEEKDAYS.join("|")})\\b`, "i"));
+  if (m) {
+    const target = WEEKDAYS.indexOf(m[2].toLowerCase());
+    let back = (today.getDay() - target + 7) % 7;
+    if (m[1] && back === 0) back = 7;
+    return { date: shift(back), rest: cut(m) };
+  }
+
+  m = text.match(new RegExp(`${B}(\\d{4})-(\\d{1,2})-(\\d{1,2})${E}`));
+  if (m && validDay(Number(m[1]), Number(m[2]), Number(m[3]))) {
+    return { date: ymd(Number(m[1]), Number(m[2]), Number(m[3])), rest: cut(m) };
+  }
+
+  m = text.match(new RegExp(`${B}(\\d{1,2})([/.-])(\\d{1,2})(?:\\2(\\d{2,4}))?${E}`));
+  // "12.50" with no year is an amount, not a date.
+  if (m && !(m[2] === "." && !m[4])) {
+    const [a, b] = [Number(m[1]), Number(m[3])];
+    const monthFirstHere = a > 12 ? false : b > 12 ? true : monthFirst;
+    const date = withYear(monthFirstHere ? a : b, monthFirstHere ? b : a, fullYear(m[4]), today);
+    if (date) return { date, rest: cut(m) };
+  }
+
+  // Named months: try "Nov 3", "3 Nov", then the run-together "Nov3"/"3Nov".
+  const month = (w: string) => (MONTH_NAMES.test(w.toLowerCase()) ? MONTHS[w.toLowerCase().slice(0, 3)] : undefined);
+  const named: [RegExp, (m: RegExpMatchArray) => [string, string, string | undefined]][] = [
+    [new RegExp(`${B}([A-Za-z]{3,9})\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?,?(?:\\s+(\\d{4}))?${E}`, "g"), (x) => [x[1], x[2], x[3]]],
+    [new RegExp(`${B}(\\d{1,2})(?:st|nd|rd|th)?\\s*([A-Za-z]{3,9})\\.?,?(?:\\s+(\\d{4}))?${E}`, "g"), (x) => [x[2], x[1], x[3]]],
+  ];
+  for (const [re, parts] of named) {
+    for (const x of text.matchAll(re)) {
+      const [word, day, year] = parts(x);
+      const mo = month(word);
+      if (!mo) continue; // "market 12" isn't March 12
+      const date = withYear(mo, Number(day), year ? Number(year) : null, today);
+      if (date) return { date, rest: text.replace(x[0], " ") };
+    }
+  }
+
+  // A bare ordinal: "on 3rd", "the 21st".
+  m = text.match(new RegExp(`${B}(\\d{1,2})(st|nd|rd|th)${E}`, "i"));
+  if (m) {
+    const day = Number(m[1]);
+    let y = today.getFullYear();
+    let mo = today.getMonth() + 1;
+    if (day > today.getDate()) {
+      mo -= 1;
+      if (mo === 0) {
+        mo = 12;
+        y -= 1;
+      }
+    }
+    if (validDay(y, mo, day)) return { date: ymd(y, mo, day), rest: cut(m) };
+  }
+
+  return { date: null, rest: text };
+}
+
 export function parseQuickEntry(
   text: string,
   accounts: ParseAccount[],
   categories: ParseCategory[],
-  today: Date = new Date()
+  today: Date = new Date(),
+  // Read 11/03 as Nov 3 (US) rather than 11 March.
+  opts: { monthFirst?: boolean } = {}
 ): QuickDraft | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -103,39 +210,11 @@ export function parseQuickEntry(
     };
   }
 
-  // Quick note: one number is the amount; everything else is matched below.
-  let rest = ` ${trimmed} `;
-  let date = isoDay(today);
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (/\byesterday\b/i.test(rest)) {
-    date = isoDay(yesterday);
-    rest = rest.replace(/\byesterday\b/gi, " ");
-  }
-  rest = rest.replace(/\btoday\b/gi, " ");
-  // "November 3, 2026", "Nov 3", "3 Nov 2026"
-  const named =
-    rest.match(/\s([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?(?:\s+(\d{4}))?(?=\s)/) ??
-    rest.match(/\s(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?(?:\s+(\d{4}))?(?=\s)/);
-  if (named) {
-    const dayFirst = /^\d/.test(named[1]);
-    const word = (dayFirst ? named[2] : named[1]).toLowerCase();
-    // Only real month names/abbreviations -- "market 12" isn't March 12.
-    const month = MONTH_NAMES.test(word) ? MONTHS[word.slice(0, 3)] : undefined;
-    const day = Number(dayFirst ? named[1] : named[2]);
-    if (month && day >= 1 && day <= 31) {
-      const y = named[3] ? Number(named[3]) : today.getFullYear();
-      date = `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      rest = rest.replace(named[0], " ");
-    }
-  }
-  const dm = rest.match(/\s(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?=\s)/);
-  if (dm) {
-    const y = dm[3] ? (dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3])) : today.getFullYear();
-    const [d, m] = [Number(dm[1]), Number(dm[2])];
-    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) date = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    rest = rest.replace(dm[0], " ");
-  }
+  // Quick note: the date (if any) first, then one number is the amount, and
+  // everything else is matched below.
+  const found = extractDate(` ${trimmed} `, today, opts.monthFirst ?? false);
+  const date = found.date ?? isoDay(today);
+  let rest = found.rest;
 
   let currency: string | null = null;
   const am = rest.match(/(?:^|\s)(₹|rs\.?|inr|\$|usd|€|eur|£|gbp)?\s*(\d[\d,]*(?:\.\d{1,2})?)(?=\s)/i);
