@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import { parseStatementLines } from "@/lib/statementParse";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
@@ -46,6 +47,9 @@ type PreviewRow = {
   // The row shows as "auto" while categoryId still equals it.
   suggestedCategoryId: string | null;
   include: boolean;
+  // Money in (a payment, refund or deposit) -- from a PDF statement, or a
+  // CSV "Type" column of "Credit". Left unchecked by default.
+  isCredit: boolean;
   // Existing transaction with the same date + amount, found when the preview
   // was built. Only shown while the row's date/amount still match it.
   match: ExistingMatch | null;
@@ -58,6 +62,10 @@ function isAutoCategorized(r: PreviewRow) {
 function isDuplicate(r: PreviewRow) {
   return !!r.match && r.match.date === r.date && Math.round(r.match.amount * 100) === Math.round(r.amount * 100);
 }
+
+// Column names given to rows read from a PDF statement, so they flow through
+// the same map -> preview steps as a CSV.
+const PDF_COLUMNS = { date: "Date", description: "Description", amount: "Amount", type: "Type" };
 
 function normalizeDate(raw: string): string {
   // Handles "2026-09-15", "09/15/2026", and "9/15/26" -- the common shapes
@@ -98,6 +106,11 @@ export default function ImportPage() {
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
   const [fileName, setFileName] = useState("");
+  const [readingPdf, setReadingPdf] = useState(false);
+  // A password-protected PDF waiting for its password.
+  const [pdfLocked, setPdfLocked] = useState<{ file: File; incorrect: boolean } | null>(null);
+  const [pdfPassword, setPdfPassword] = useState("");
+  const [pdfNote, setPdfNote] = useState<string | null>(null);
   const [history, setHistory] = useState<ImportRecord[] | null>(null);
   const [historyError, setHistoryError] = useState(false);
 
@@ -128,8 +141,9 @@ export default function ImportPage() {
     loadLastActivity();
   }, []);
 
-  async function ensureOptionsLoaded() {
-    if (loaded) return;
+  // Returns the currency the file will default to (used to read PDF dates).
+  async function ensureOptionsLoaded(): Promise<string> {
+    if (loaded) return currency;
     const [instRes, catRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/categories")]);
     const insts: Instrument[] = await instRes.json();
     const cats: Category[] = await catRes.json();
@@ -139,6 +153,7 @@ export default function ImportPage() {
     setCurrency(insts.find((i) => !i.archived)?.currency ?? "USD");
     setBulkCategoryId(cats.find((c) => c.direction === "EXPENSE")?.id ?? "");
     setLoaded(true);
+    return insts.find((i) => !i.archived)?.currency ?? "USD";
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -147,7 +162,14 @@ export default function ImportPage() {
     setError(null);
     setResultMessage(null);
     setFileName(file.name);
-    await ensureOptionsLoaded();
+    setPdfNote(null);
+    setPdfLocked(null);
+    const fileCurrency = await ensureOptionsLoaded();
+
+    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+      await readPdf(file, fileCurrency);
+      return;
+    }
 
     Papa.parse<Record<string, string>>(file, {
       header: true,
@@ -172,6 +194,65 @@ export default function ImportPage() {
       },
       error: () => setError("Couldn't read that file — make sure it's a valid CSV."),
     });
+  }
+
+  // PDF statements are read in the browser: text lines -> transactions ->
+  // rows in the same shape as a CSV, then the usual map/preview steps.
+  async function readPdf(file: File, fileCurrency: string, password?: string) {
+    setError(null);
+    setReadingPdf(true);
+    try {
+      const { extractPdfLines, PdfPasswordError } = await import("@/lib/pdfText");
+      let lines: string[];
+      try {
+        lines = await extractPdfLines(await file.arrayBuffer(), password);
+      } catch (err) {
+        if (err instanceof PdfPasswordError) {
+          setPdfLocked({ file, incorrect: err.incorrect });
+          return;
+        }
+        throw err;
+      }
+      setPdfLocked(null);
+      setPdfPassword("");
+
+      if (lines.join("").trim().length === 0) {
+        setError(
+          "This PDF has no readable text — it's probably a scanned image. Download the statement as CSV, or as a regular (text) PDF, from your bank's website."
+        );
+        return;
+      }
+      // US statements write 11/03 for Nov 3; most others mean 11 March.
+      const found = parseStatementLines(lines, { monthFirstByDefault: fileCurrency === "USD", today: new Date() });
+      if (found.length === 0) {
+        setError(
+          "Couldn't find any transactions in this PDF — its layout wasn't recognised. Try the CSV download from your bank instead."
+        );
+        return;
+      }
+      const credits = found.filter((r) => r.isCredit).length;
+      setHeaders(Object.values(PDF_COLUMNS));
+      setRawRows(
+        found.map((r) => ({
+          [PDF_COLUMNS.date]: r.date,
+          [PDF_COLUMNS.description]: r.description,
+          [PDF_COLUMNS.amount]: r.amount.toFixed(2),
+          [PDF_COLUMNS.type]: r.isCredit ? "Credit" : "Debit",
+        }))
+      );
+      setColumnMap({ date: PDF_COLUMNS.date, description: PDF_COLUMNS.description, amount: PDF_COLUMNS.amount });
+      setPdfNote(
+        `Found ${found.length} transaction${found.length === 1 ? "" : "s"} in the PDF${
+          credits ? ` (${credits} payment${credits === 1 ? "" : "s"}/refund${credits === 1 ? "" : "s"} — these start unchecked)` : ""
+        }. Check the account and currency, then preview.`
+      );
+      setStep("map");
+    } catch (err) {
+      console.error("PDF import failed:", err);
+      setError("Couldn't read that PDF. If it opens normally on your computer, try the CSV download from your bank instead.");
+    } finally {
+      setReadingPdf(false);
+    }
   }
 
   async function findExistingMatches(preview: PreviewRow[]): Promise<(ExistingMatch | null)[] | null> {
@@ -210,6 +291,7 @@ export default function ImportPage() {
     const preview: PreviewRow[] = rawRows.map((r) => {
       const rawAmount = r[columnMap.amount] ?? "";
       const amount = Math.abs(parseFloat(rawAmount.replace(/[^0-9.-]/g, "")) || 0);
+      const isCredit = (r[PDF_COLUMNS.type] ?? "").trim().toLowerCase() === "credit";
       return {
         rawDate: r[columnMap.date] ?? "",
         rawDescription: r[columnMap.description] ?? "",
@@ -218,7 +300,8 @@ export default function ImportPage() {
         amount,
         categoryId: defaultCategoryId,
         suggestedCategoryId: null,
-        include: amount > 0,
+        include: amount > 0 && !isCredit,
+        isCredit,
         match: null,
       };
     });
@@ -315,7 +398,7 @@ export default function ImportPage() {
       <div>
         <h1 className="text-xl font-semibold">Import transactions</h1>
         <p className="text-sm text-gray-500">
-          Upload a CSV export from a bank or credit card statement — map its columns, assign categories, and import
+          Upload a CSV export or PDF statement from your bank or card — check the columns, assign categories, and import
           in bulk instead of entering rows one at a time.
         </p>
       </div>
@@ -355,8 +438,52 @@ export default function ImportPage() {
 
       {step === "upload" && (
         <div className="rounded-lg border bg-white p-6 text-center">
-          <input type="file" accept=".csv" onChange={handleFile} className="mx-auto text-sm" />
-          <p className="mt-2 text-xs text-gray-400">CSV files only, with a header row.</p>
+          <input
+            type="file"
+            accept=".csv,.pdf,text/csv,application/pdf"
+            onChange={handleFile}
+            disabled={readingPdf}
+            className="mx-auto text-sm"
+          />
+          <p className="mt-2 text-xs text-gray-400">
+            CSV (with a header row) or PDF statement. PDFs are read on this device — the file isn&apos;t uploaded.
+          </p>
+          {readingPdf && <p className="mt-3 text-sm text-gray-500">Reading the PDF...</p>}
+          {pdfLocked && (
+            <form
+              className="mx-auto mt-4 flex max-w-sm flex-col gap-2 text-left"
+              onSubmit={(e) => {
+                e.preventDefault();
+                readPdf(pdfLocked.file, currency, pdfPassword);
+              }}
+            >
+              <label className="text-sm text-gray-700">
+                {pdfLocked.incorrect
+                  ? "That password didn't work — try again."
+                  : "This statement is password-protected. Enter its password:"}
+              </label>
+              <p className="text-xs text-gray-400">
+                Banks often use part of your name or date of birth — check the email the statement came with.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  autoFocus
+                  value={pdfPassword}
+                  onChange={(e) => setPdfPassword(e.target.value)}
+                  className="flex-1 rounded-md border px-3 py-2 text-sm"
+                  autoComplete="off"
+                />
+                <button
+                  type="submit"
+                  disabled={!pdfPassword || readingPdf}
+                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  Open
+                </button>
+              </div>
+            </form>
+          )}
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </div>
       )}
@@ -364,6 +491,9 @@ export default function ImportPage() {
       {step === "map" && (
         <div className="space-y-4 rounded-lg border bg-white p-4">
           <h2 className="text-sm font-medium text-gray-700">Match the columns from your file</h2>
+          {pdfNote && (
+            <p className="rounded-md border border-brand-300 bg-brand-50 p-3 text-sm text-ink-800">{pdfNote}</p>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {(["date", "description", "amount"] as const).map((field) => (
               <div key={field}>
@@ -529,6 +659,14 @@ export default function ImportPage() {
                       />
                     </td>
                     <td className="max-w-xs truncate p-2 text-gray-600" title={r.rawDescription}>
+                      {r.isCredit && (
+                        <span
+                          className="mr-1 rounded bg-income-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-income-600"
+                          title="Money in — a payment, refund or deposit. Unchecked by default."
+                        >
+                          credit
+                        </span>
+                      )}
                       {r.rawDescription}
                     </td>
                     <td className="p-2 text-right">
