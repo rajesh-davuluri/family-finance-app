@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { InlineButton, editMessage, sendMessage, telegramApi, userForLinkCode, webhookSecretValid } from "@/lib/telegram";
-import { parseQuickEntry } from "@/lib/telegramParse";
+import { MAX_ENTRIES_PER_MESSAGE, ParseAccount, ParseCategory, parseQuickEntry, splitEntries } from "@/lib/telegramParse";
 import { suggestCategories } from "@/lib/categorize";
 import { notifyHousehold } from "@/lib/notify";
 import { todayInZone } from "@/lib/appTimezone";
@@ -20,7 +20,10 @@ const HELP = `Send me a purchase and I'll add it to Family Finance after you con
 • 450 swiggy hdfc
 • groceries 1200 amex yesterday
 • ₹99 netflix 30/10
+• Costco: $23.96 on November 3, 2026
 • or paste a bank SMS/email alert
+
+Several at once? Put each on its own line (or separate pasted alerts with a blank line).
 
 I pick the card from its name or last 4 digits, and the category from your past transactions — you can change either before adding.
 
@@ -114,15 +117,62 @@ async function handleMessage(msg: TgMessage) {
     }),
   ]);
 
-  const draft = parseQuickEntry(text, accounts, categories, todayInZone());
-  if (!draft) {
-    await sendMessage(chatId, `I couldn't find an amount in that.\n\n${HELP}`);
+  // Clear out drafts nobody acted on.
+  await prisma.pendingTelegramTransaction.deleteMany({
+    where: { householdId: link.householdId, createdAt: { lt: new Date(Date.now() - PENDING_TTL_MS) } },
+  });
+
+  const allEntries = splitEntries(text);
+  const entries = allEntries.slice(0, MAX_ENTRIES_PER_MESSAGE);
+  const created: string[] = [];
+  const unreadable: string[] = [];
+  const refunds: string[] = [];
+  for (const entry of entries) {
+    const result = await createDraft(entry, chatId, link, accounts, categories);
+    if (result === "no-amount") unreadable.push(entry);
+    else if (result === "refund") refunds.push(entry);
+    else {
+      created.push(result);
+      const view = await summary(result);
+      if (view) await sendMessage(chatId, view.text, view.buttons);
+    }
+  }
+
+  // A single entry keeps the simple replies; several get a wrap-up message
+  // with "add all" / "set card for all", plus anything that was skipped.
+  if (entries.length === 1) {
+    if (unreadable.length) await sendMessage(chatId, `I couldn't find an amount in that.\n\n${HELP}`);
+    if (refunds.length) {
+      await sendMessage(chatId, "That looks like a refund or credit — those aren't added from Telegram yet. Please add it in the app.");
+    }
     return;
   }
-  if (draft.isRefund) {
-    await sendMessage(chatId, "That looks like a refund or credit — those aren't added from Telegram yet. Please add it in the app.");
-    return;
+  const notes: string[] = [];
+  if (unreadable.length) notes.push(`Couldn't find an amount in:\n${unreadable.map((e) => `• ${e.slice(0, 80)}`).join("\n")}`);
+  if (refunds.length) notes.push(`Skipped refunds/credits (add these in the app):\n${refunds.map((e) => `• ${e.slice(0, 80)}`).join("\n")}`);
+  if (allEntries.length > entries.length) {
+    notes.push(`Only the first ${MAX_ENTRIES_PER_MESSAGE} were read — send the other ${allEntries.length - entries.length} in another message.`);
   }
+  if (created.length > 1) {
+    const view = await batchSummary(chatId, link.householdId);
+    await sendMessage(chatId, [view.text, ...notes].join("\n\n"), view.buttons);
+  } else if (notes.length) {
+    await sendMessage(chatId, notes.join("\n\n"));
+  }
+}
+
+// Turns one entry of a message into a pending draft. Returns its id, or why
+// it was skipped.
+async function createDraft(
+  entry: string,
+  chatId: string,
+  link: { householdId: string; userId: string },
+  accounts: ParseAccount[],
+  categories: ParseCategory[]
+): Promise<string | "no-amount" | "refund"> {
+  const draft = parseQuickEntry(entry, accounts, categories, todayInZone());
+  if (!draft) return "no-amount";
+  if (draft.isRefund) return "refund";
 
   const instrumentId = draft.instrumentId ?? (accounts.length === 1 ? accounts[0].id : null);
   let categoryId = draft.categoryId;
@@ -131,11 +181,6 @@ async function handleMessage(msg: TgMessage) {
     if (suggestion && categories.some((c) => c.id === suggestion.categoryId)) categoryId = suggestion.categoryId;
   }
   if (!categoryId) categoryId = categories.find((c) => c.name === "Other Expense")?.id ?? null;
-
-  // Clear out drafts nobody acted on.
-  await prisma.pendingTelegramTransaction.deleteMany({
-    where: { householdId: link.householdId, createdAt: { lt: new Date(Date.now() - PENDING_TTL_MS) } },
-  });
 
   const pending = await prisma.pendingTelegramTransaction.create({
     data: {
@@ -150,8 +195,24 @@ async function handleMessage(msg: TgMessage) {
       categoryId,
     },
   });
-  const view = await summary(pending.id);
-  if (view) await sendMessage(chatId, view.text, view.buttons);
+  return pending.id;
+}
+
+// The wrap-up shown after a multi-line message: how many drafts in this chat
+// are ready, and buttons to add them all or give the card-less ones a card.
+async function batchSummary(chatId: string, householdId: string) {
+  const pending = await prisma.pendingTelegramTransaction.findMany({
+    where: { chatId, householdId },
+    select: { instrumentId: true, categoryId: true },
+  });
+  const ready = pending.filter((p) => p.instrumentId && p.categoryId).length;
+  const needCard = pending.filter((p) => !p.instrumentId).length;
+  const lines = [`${pending.length} transaction${pending.length === 1 ? "" : "s"} waiting above.`];
+  if (needCard) lines.push(`💳 ${needCard} still need a card — set one for all of them below, or per transaction above.`);
+  const buttons: InlineButton[][] = [];
+  if (needCard) buttons.push([{ text: `💳 Set card for all (${needCard})`, callback_data: "ca" }]);
+  if (ready) buttons.push([{ text: `✅ Add all ready (${ready})`, callback_data: "aa" }]);
+  return { text: lines.join("\n"), buttons };
 }
 
 type Pending = NonNullable<Awaited<ReturnType<typeof loadPending>>>;
@@ -225,7 +286,12 @@ async function handleCallback(cb: TgCallback) {
   const messageId = cb.message?.message_id;
   const [action, pendingId, indexStr] = (cb.data ?? "").split(":");
   await telegramApi("answerCallbackQuery", { callback_query_id: cb.id });
-  if (!chatId || !messageId || !pendingId) return;
+  if (!chatId || !messageId) return;
+  if (action === "aa" || action === "ca") {
+    await handleBatchCallback(action, pendingId, chatId, messageId);
+    return;
+  }
+  if (!pendingId) return;
 
   const p = await loadPending(pendingId);
   // Only the chat that created a draft can act on it.
@@ -264,7 +330,7 @@ async function handleCallback(cb: TgCallback) {
       if (categories[index]) await prisma.pendingTelegramTransaction.update({ where: { id: p.id }, data: { categoryId: categories[index].id } });
       break;
     case "a":
-      await add(p, chatId, messageId, accounts, categories);
+      await add(p, chatId, messageId, { accounts, categories });
       return;
   }
 
@@ -273,20 +339,14 @@ async function handleCallback(cb: TgCallback) {
   if (view) await editMessage(chatId, messageId, view.text, view.buttons);
 }
 
-async function add(
-  p: Pending,
-  chatId: string,
-  messageId: number,
-  accounts: { id: string; name: string; currency: string }[],
-  categories: { id: string; name: string }[]
-) {
+type Lists = Awaited<ReturnType<typeof listsFor>>;
+
+// Records a complete draft as a transaction. Returns what was added, or null
+// if it's incomplete or was already handled.
+async function commit(p: Pending, { accounts, categories }: Lists) {
   const account = accounts.find((a) => a.id === p.instrumentId);
   const category = categories.find((c) => c.id === p.categoryId);
-  if (!account || !category) {
-    const view = await summary(p.id);
-    if (view) await editMessage(chatId, messageId, view.text, view.buttons);
-    return;
-  }
+  if (!account || !category) return null;
   const currency = p.currency || account.currency;
 
   // Removing the draft and adding the transaction happen together: a
@@ -309,14 +369,82 @@ async function add(
     });
     return true;
   });
-  if (!added) return;
+  if (!added) return null;
+  return { account, category, amount: `${currency} ${Number(p.amount).toFixed(2)}` };
+}
 
-  const amount = `${currency} ${Number(p.amount).toFixed(2)}`;
+async function add(p: Pending, chatId: string, messageId: number, lists: Lists) {
+  const done = await commit(p, lists);
+  if (!done) {
+    const view = await summary(p.id);
+    if (view) await editMessage(chatId, messageId, view.text, view.buttons);
+    return;
+  }
   await editMessage(
     chatId,
     messageId,
-    `✅ Added ${amount}${p.notes ? ` · ${p.notes}` : ""}\n💳 ${account.name} · 🏷 ${category.name} · 📅 ${p.date.toISOString().slice(0, 10)}`
+    `✅ Added ${done.amount}${p.notes ? ` · ${p.notes}` : ""}\n💳 ${done.account.name} · 🏷 ${done.category.name} · 📅 ${p.date.toISOString().slice(0, 10)}`
   );
   const user = await prisma.user.findUnique({ where: { id: p.userId }, select: { name: true } });
-  await notifyHousehold(p.householdId, p.userId, `${user?.name ?? "Someone"} added ${amount} ${category.name} on ${account.name} via Telegram`);
+  await notifyHousehold(p.householdId, p.userId, `${user?.name ?? "Someone"} added ${done.amount} ${done.category.name} on ${done.account.name} via Telegram`);
+}
+
+// "aa": add every ready draft in this chat. "ca": pick a card for every
+// card-less draft ("ca" shows the list, "ca:<n>" applies account n).
+async function handleBatchCallback(action: string, arg: string | undefined, chatId: string, messageId: number) {
+  const link = await prisma.telegramLink.findUnique({ where: { chatId } });
+  if (!link) return;
+  const lists = await listsFor(link.householdId);
+
+  if (action === "ca" && arg === undefined) {
+    await editMessage(chatId, messageId, "Which card or account were these on?", [
+      ...grid(lists.accounts.map((a, i) => ({ text: a.last4 ? `${a.name} ••${a.last4}` : a.name, callback_data: `ca:${i}` }))),
+    ]);
+    return;
+  }
+  if (action === "ca") {
+    const account = lists.accounts[Number(arg)];
+    if (account) {
+      await prisma.pendingTelegramTransaction.updateMany({
+        where: { chatId, householdId: link.householdId, instrumentId: null },
+        data: { instrumentId: account.id },
+      });
+    }
+    const view = await batchSummary(chatId, link.householdId);
+    await editMessage(
+      chatId,
+      messageId,
+      `${account ? `💳 Set to ${account.name} — the cards above update when you open them.\n` : ""}${view.text}`,
+      view.buttons
+    );
+    return;
+  }
+
+  // "aa"
+  const ready = await prisma.pendingTelegramTransaction.findMany({
+    where: { chatId, householdId: link.householdId, instrumentId: { not: null }, categoryId: { not: null } },
+    orderBy: { date: "asc" },
+  });
+  const added: string[] = [];
+  for (const p of ready) {
+    const done = await commit(p, lists);
+    if (done) added.push(`• ${done.amount}${p.notes ? ` · ${p.notes}` : ""} · ${done.category.name} · ${p.date.toISOString().slice(0, 10)}`);
+  }
+  const left = await prisma.pendingTelegramTransaction.count({ where: { chatId, householdId: link.householdId } });
+  const view = left ? await batchSummary(chatId, link.householdId) : null;
+  await editMessage(
+    chatId,
+    messageId,
+    [
+      added.length ? `✅ Added ${added.length}:\n${added.join("\n")}` : "Nothing was ready to add.",
+      left ? view!.text : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    view?.buttons
+  );
+  if (added.length) {
+    const user = await prisma.user.findUnique({ where: { id: link.userId }, select: { name: true } });
+    await notifyHousehold(link.householdId, link.userId, `${user?.name ?? "Someone"} added ${added.length} transactions via Telegram`);
+  }
 }

@@ -22,6 +22,42 @@ export type QuickDraft = {
   isRefund: boolean;
 };
 
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+const MONTH_NAMES =
+  /^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)$/;
+
+// Wording that marks a bank alert rather than a quick note or statement line.
+const ALERT_WORDS = /\b(spent|debited|credited|charged|purchase|transaction|card ending|ending|avl|available|a\/c)\b/i;
+
+// The most entries one message can hold, to keep a mis-paste from flooding
+// the chat with confirmations.
+export const MAX_ENTRIES_PER_MESSAGE = 20;
+
+// Splits one Telegram message into separate transactions. Blank-line
+// separated blocks are separate; within a block, short lines that each carry
+// a number (and no alert wording) are one transaction per line -- e.g. a
+// list copied from a card app:
+//   ParkX Management: $5.95 on November 4, 2026
+//   Costco: $23.96 on November 3, 2026
+// A multi-line pasted alert stays one transaction.
+export function splitEntries(text: string): string[] {
+  const entries: string[] = [];
+  for (const block of text.split(/\n\s*\n/)) {
+    const lines = block
+      .split("\n")
+      .map((l) => l.trim().replace(/^(?:[-•*]|\d{1,2}[.)])\s+(?=\S)/, ""))
+      .filter(Boolean);
+    if (lines.length === 0) continue;
+    const onePerLine = lines.length > 1 && lines.every((l) => l.length <= 100 && /\d/.test(l) && !ALERT_WORDS.test(l));
+    if (onePerLine) entries.push(...lines);
+    else entries.push(lines.join(" "));
+  }
+  return entries;
+}
+
 const STOP_WORDS = new Set(["on", "at", "for", "to", "from", "via", "using", "paid", "spent", "card", "the", "a", "rs", "inr"]);
 
 function isoDay(d: Date) {
@@ -48,8 +84,12 @@ export function parseQuickEntry(
   const trimmed = text.trim();
   if (!trimmed) return null;
 
-  // A pasted bank alert carries its own amount, card and date.
-  const alert = /(?:INR|Rs\.?|₹|USD|\$|EUR|€|GBP|£)\s*\d/i.test(trimmed) && trimmed.length > 40 ? parseBankAlert(trimmed) : null;
+  // A pasted bank alert ("Rs 450 spent on card ending 1234 at ...") carries
+  // its own amount, card and date. Statement-style lines like "Costco:
+  // $23.96 on November 3, 2026" have no alert wording and go through the
+  // quick-note path below, which keeps the merchant name.
+  const looksLikeAlert = ALERT_WORDS.test(trimmed) && /(?:INR|Rs\.?|₹|USD|\$|EUR|€|GBP|£)\s*\d/i.test(trimmed);
+  const alert = looksLikeAlert ? parseBankAlert(trimmed) : null;
   if (alert) {
     const account = alert.last4 ? accounts.find((a) => a.last4 === alert.last4) : undefined;
     return {
@@ -73,6 +113,22 @@ export function parseQuickEntry(
     rest = rest.replace(/\byesterday\b/gi, " ");
   }
   rest = rest.replace(/\btoday\b/gi, " ");
+  // "November 3, 2026", "Nov 3", "3 Nov 2026"
+  const named =
+    rest.match(/\s([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?(?:\s+(\d{4}))?(?=\s)/) ??
+    rest.match(/\s(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?(?:\s+(\d{4}))?(?=\s)/);
+  if (named) {
+    const dayFirst = /^\d/.test(named[1]);
+    const word = (dayFirst ? named[2] : named[1]).toLowerCase();
+    // Only real month names/abbreviations -- "market 12" isn't March 12.
+    const month = MONTH_NAMES.test(word) ? MONTHS[word.slice(0, 3)] : undefined;
+    const day = Number(dayFirst ? named[1] : named[2]);
+    if (month && day >= 1 && day <= 31) {
+      const y = named[3] ? Number(named[3]) : today.getFullYear();
+      date = `${y}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      rest = rest.replace(named[0], " ");
+    }
+  }
   const dm = rest.match(/\s(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?(?=\s)/);
   if (dm) {
     const y = dm[3] ? (dm[3].length === 2 ? 2000 + Number(dm[3]) : Number(dm[3])) : today.getFullYear();
@@ -123,6 +179,7 @@ export function parseQuickEntry(
   const notes = tokens
     .filter((t, i) => !used.has(i) && !STOP_WORDS.has(t.toLowerCase()))
     .join(" ")
+    .replace(/[\s:;,\-–—]+$/, "")
     .trim();
 
   return {
