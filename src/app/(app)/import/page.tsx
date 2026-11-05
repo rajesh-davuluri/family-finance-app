@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
@@ -603,8 +604,12 @@ export default function ImportPage() {
 
 function ImportHistory({ history, failed }: { history: ImportRecord[] | null; failed: boolean }) {
   return (
-    <div className="space-y-2">
-      <h2 className="text-sm font-medium text-gray-700">Import history</h2>
+    <CollapsibleSection
+      storageKey="import-history"
+      variant="plain"
+      title="Import history"
+      summary={history && history.length > 0 ? `${history.length} import${history.length === 1 ? "" : "s"}` : undefined}
+    >
       {failed && history === null ? (
         <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           Couldn&apos;t load import history. If this was just deployed, the database may still need its update
@@ -659,7 +664,7 @@ function ImportHistory({ history, failed }: { history: ImportRecord[] | null; fa
           </table>
         </div>
       )}
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -678,8 +683,12 @@ function RecordsUpTo({ instruments }: { instruments: LastActivity["instruments"]
     (a, b) => Number(b.type === "CREDIT_CARD") - Number(a.type === "CREDIT_CARD") || a.name.localeCompare(b.name)
   );
   return (
-    <div className="space-y-2">
-      <h2 className="text-sm font-medium text-gray-700">Where your records are up to</h2>
+    <CollapsibleSection
+      storageKey="import-records-up-to"
+      variant="plain"
+      title="Where your records are up to"
+      summary={`${instruments.length} account${instruments.length === 1 ? "" : "s"}`}
+    >
       <div className="overflow-x-auto rounded-lg border bg-white">
         <table className="w-full text-sm">
           <thead>
@@ -722,7 +731,7 @@ function RecordsUpTo({ instruments }: { instruments: LastActivity["instruments"]
           </tbody>
         </table>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
 

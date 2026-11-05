@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
+import CollapsibleSection from "@/components/CollapsibleSection";
+import SpendingByMonth from "@/components/SpendingByMonth";
 import { formatDate } from "@/lib/formatDate";
 import { LastActivity, SOURCE_LABELS, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
@@ -406,6 +408,8 @@ export default function DashboardPage() {
         )}
       </div>
 
+      <SpendingByMonth />
+
       {/* Budget status -- compact, always-visible, links out to the full page */}
       {budgets && budgets.length > 0 && (
         <div className="rounded-lg border bg-white p-4">
@@ -660,8 +664,7 @@ export default function DashboardPage() {
 
       {/* Household activity feed -- recent transactions and transfers, who added what */}
       {activity && activity.length > 0 && (
-        <div className="rounded-lg border bg-white p-4">
-          <h2 className="mb-3 text-sm font-medium text-gray-700">Recent activity</h2>
+        <CollapsibleSection storageKey="dashboard-recent-activity" title="Recent activity" summary={`${activity.length} latest`}>
           <div className="space-y-2">
             {activity.map((a) => (
               <div key={a.id} className="flex items-center justify-between text-sm">
@@ -680,7 +683,7 @@ export default function DashboardPage() {
               </div>
             ))}
           </div>
-        </div>
+        </CollapsibleSection>
       )}
     </div>
   );
@@ -741,8 +744,11 @@ function LastTransactionPerAccount({ instruments }: { instruments: LastActivity[
     (a, b) => Number(b.type === "CREDIT_CARD") - Number(a.type === "CREDIT_CARD") || a.name.localeCompare(b.name)
   );
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <h2 className="mb-3 text-sm font-medium text-gray-700">Last transaction on each card &amp; account</h2>
+    <CollapsibleSection
+      storageKey="dashboard-last-per-account"
+      title="Last transaction on each card & account"
+      summary={`${instruments.length} account${instruments.length === 1 ? "" : "s"}`}
+    >
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -804,6 +810,6 @@ function LastTransactionPerAccount({ instruments }: { instruments: LastActivity[
           </tbody>
         </table>
       </div>
-    </div>
+    </CollapsibleSection>
   );
 }
