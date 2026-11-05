@@ -69,7 +69,6 @@ export async function POST(req: Request) {
 
   const transaction = await prisma.transaction.create({
     data: {
-      source: "MANUAL",
       amount: data.amount,
       currency: data.currency,
       date: new Date(data.date),

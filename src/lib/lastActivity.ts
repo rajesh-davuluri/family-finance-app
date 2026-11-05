@@ -25,8 +25,9 @@ export const SOURCE_LABELS: Record<TransactionSource, string> = {
   RECURRING: "from recurring",
 };
 
-// The stored source, or for rows from before it was stored, what it can be
-// inferred from (email alerts were saved as "Email: ..." one-row imports).
+// How a transaction got into the app, inferred from what's recorded with it
+// (email alerts are saved as "Email: ..." one-row imports). Reads a stored
+// \`source\` too, once transactions carry one.
 export function sourceOf(t: {
   source?: string | null;
   recurringTemplateId?: string | null;
