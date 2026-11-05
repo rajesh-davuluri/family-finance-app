@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { htmlToText, parseBankAlert } from "@/lib/bankAlert";
 import { suggestCategories } from "@/lib/categorize";
 import { notifyWholeHousehold } from "@/lib/notify";
+import { calendarDateInZone } from "@/lib/appTimezone";
 
 // Turns one bank card-alert email into a transaction for a household --
 // shared by the Gmail script endpoint and the Postmark webhook. Anything
@@ -83,7 +84,7 @@ export async function processInboundEmail(householdId: string, email: InboundEma
 
   const currency = alert.currency ?? instrument.currency;
   const dateStr =
-    alert.date ?? (receivedAt ? new Date(receivedAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    alert.date ?? calendarDateInZone(receivedAt && !isNaN(Date.parse(receivedAt)) ? new Date(receivedAt) : new Date());
   const date = new Date(`${dateStr}T00:00:00Z`);
 
   // Same card, day and amount already recorded (e.g. the alert was forwarded

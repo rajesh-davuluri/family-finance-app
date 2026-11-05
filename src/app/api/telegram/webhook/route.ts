@@ -4,6 +4,7 @@ import { InlineButton, editMessage, sendMessage, telegramApi, userForLinkCode, w
 import { parseQuickEntry } from "@/lib/telegramParse";
 import { suggestCategories } from "@/lib/categorize";
 import { notifyHousehold } from "@/lib/notify";
+import { todayInZone } from "@/lib/appTimezone";
 
 // Telegram bot webhook. A linked member sends "450 swiggy hdfc" or pastes a
 // bank alert; the bot replies with what it understood and buttons to add,
@@ -113,7 +114,7 @@ async function handleMessage(msg: TgMessage) {
     }),
   ]);
 
-  const draft = parseQuickEntry(text, accounts, categories);
+  const draft = parseQuickEntry(text, accounts, categories, todayInZone());
   if (!draft) {
     await sendMessage(chatId, `I couldn't find an amount in that.\n\n${HELP}`);
     return;
