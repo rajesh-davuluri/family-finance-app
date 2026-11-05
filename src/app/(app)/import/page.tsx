@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
-import { formatDate } from "@/lib/formatDate";
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
@@ -71,7 +71,9 @@ function normalizeDate(raw: string): string {
     if (y.length === 2) y = `20${y}`;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
-  return new Date().toISOString().slice(0, 10);
+  // Today on this device's clock -- toISOString() would be UTC, which is
+  // already tomorrow during a US evening.
+  return getTodayLocal();
 }
 
 export default function ImportPage() {
