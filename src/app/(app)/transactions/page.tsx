@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import AddTransactionModal, { EditableTransaction } from "@/components/AddTransactionModal";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import { SOURCE_LABELS, sourceOf } from "@/lib/lastActivity";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -16,6 +17,10 @@ type Transaction = {
   category: Category;
   instrument: Instrument;
   createdBy?: { name: string };
+  source?: string | null;
+  recurringTemplateId?: string | null;
+  importBatchId?: string | null;
+  importBatch?: { fileName: string } | null;
 };
 
 const EMPTY_SEARCH = { from: "", to: "", instrumentId: "", categoryId: "" };
@@ -340,7 +345,12 @@ export default function TransactionsPage() {
                   <td className="p-3">{t.category.name}</td>
                   <td className="p-3">{t.instrument.name}</td>
                   <td className="p-3 text-gray-500">{t.notes || "—"}</td>
-                  <td className="p-3 text-gray-500">{t.createdBy?.name ?? "—"}</td>
+                  <td className="p-3 text-gray-500">
+                    {t.createdBy?.name ?? "—"}
+                    {sourceOf(t) !== "MANUAL" && (
+                      <span className="block text-xs text-gray-400">{SOURCE_LABELS[sourceOf(t)]}</span>
+                    )}
+                  </td>
                   <td
                     className={`p-3 text-right font-medium ${
                       t.category.direction === "INCOME" ? "text-income-600" : "text-expense-600"

@@ -16,5 +16,6 @@ export const config = {
     "/recurring/:path*",
     "/household/:path*",
     "/settings/:path*",
+    "/reports/:path*",
   ],
 };

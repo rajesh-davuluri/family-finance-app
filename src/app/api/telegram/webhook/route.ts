@@ -4,7 +4,7 @@ import { InlineButton, editMessage, sendMessage, telegramApi, userForLinkCode, w
 import { MAX_ENTRIES_PER_MESSAGE, ParseAccount, ParseCategory, parseQuickEntry, splitEntries } from "@/lib/telegramParse";
 import { suggestCategories } from "@/lib/categorize";
 import { notifyHousehold } from "@/lib/notify";
-import { todayInZone } from "@/lib/appTimezone";
+import { prefersMonthFirst, todayInZone } from "@/lib/appTimezone";
 
 // Telegram bot webhook. A linked member sends "450 swiggy hdfc" or pastes a
 // bank alert; the bot replies with what it understood and buttons to add,
@@ -19,8 +19,10 @@ const HELP = `Send me a purchase and I'll add it to Family Finance after you con
 
 • 450 swiggy hdfc
 • groceries 1200 amex yesterday
-• ₹99 netflix 30/10
+• 99 netflix 11/03  (or Nov 3, 3rd, monday, 2 days ago)
 • Costco: $23.96 on November 3, 2026
+
+No date means today.
 • or paste a bank SMS/email alert
 
 Several at once? Put each on its own line (or separate pasted alerts with a blank line).
@@ -170,7 +172,7 @@ async function createDraft(
   accounts: ParseAccount[],
   categories: ParseCategory[]
 ): Promise<string | "no-amount" | "refund"> {
-  const draft = parseQuickEntry(entry, accounts, categories, todayInZone());
+  const draft = parseQuickEntry(entry, accounts, categories, todayInZone(), { monthFirst: prefersMonthFirst() });
   if (!draft) return "no-amount";
   if (draft.isRefund) return "refund";
 
@@ -357,6 +359,7 @@ async function commit(p: Pending, { accounts, categories }: Lists) {
     if (removed.count === 0) return false;
     await tx.transaction.create({
       data: {
+        source: "TELEGRAM",
         amount: p.amount,
         currency,
         date: p.date,

@@ -30,3 +30,9 @@ export function todayInZone(): Date {
   const [y, m, d] = calendarDateInZone().split("-").map(Number);
   return new Date(y, m - 1, d);
 }
+
+// Whether people here write 11/03 for November 3 (month first). True for
+// time zones in the Americas -- the US default -- false elsewhere (11 March).
+export function prefersMonthFirst(): boolean {
+  return zone().startsWith("America/");
+}

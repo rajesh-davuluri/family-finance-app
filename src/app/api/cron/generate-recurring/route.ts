@@ -51,6 +51,7 @@ export async function GET(req: Request) {
           householdId: template.householdId,
           createdById: householdAdmin.id,
           recurringTemplateId: template.id,
+          source: "RECURRING",
         },
       });
       generated++;

@@ -20,6 +20,7 @@ const primaryLinks = [
 ];
 
 const moreLinks = [
+  { href: "/reports", label: "Reports" },
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
   { href: "/import", label: "Import" },
@@ -59,7 +60,7 @@ export default function Navbar() {
   }, []);
 
   return (
-    <nav className="bg-ink-900">
+    <nav className="bg-ink-900 print:hidden">
       <div className="mx-auto flex max-w-6xl items-center px-4 py-3">
         <span className="font-display mr-8 whitespace-nowrap text-lg italic text-brand-300">Family Finance</span>
 

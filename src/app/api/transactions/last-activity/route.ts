@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { sourceOf } from "@/lib/lastActivity";
 
 // "When did we last record anything?" -- covers every transaction, whether
 // entered by hand or imported from a statement. Returns the most recently
@@ -16,6 +17,7 @@ function findLatest(where: { householdId: string; instrumentId?: string }, order
       category: { select: { name: true, direction: true } },
       instrument: { select: { name: true } },
       createdBy: { select: { name: true } },
+      importBatch: { select: { fileName: true } },
     },
   });
 }
@@ -31,7 +33,7 @@ function serialize(t: NonNullable<TxnWithRelations>) {
     direction: t.category.direction,
     instrumentName: t.instrument.name,
     createdByName: t.createdBy.name,
-    source: t.importBatchId ? ("IMPORTED" as const) : t.recurringTemplateId ? ("RECURRING" as const) : ("MANUAL" as const),
+    source: sourceOf(t),
   };
 }
 
