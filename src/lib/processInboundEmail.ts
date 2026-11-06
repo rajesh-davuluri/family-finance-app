@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { findExistingDuplicate } from "@/lib/duplicateData";
 import { htmlToText, parseBankAlert } from "@/lib/bankAlert";
 import { suggestCategories } from "@/lib/categorize";
 import { notifyWholeHousehold } from "@/lib/notify";
@@ -87,15 +88,19 @@ export async function processInboundEmail(householdId: string, email: InboundEma
     alert.date ?? calendarDateInZone(receivedAt && !isNaN(Date.parse(receivedAt)) ? new Date(receivedAt) : new Date());
   const date = new Date(`${dateStr}T00:00:00Z`);
 
-  // Same card, day and amount already recorded (e.g. the alert was forwarded
-  // twice, or the statement was imported first) -- don't add it again.
-  const nextDay = new Date(date);
-  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-  const existing = await prisma.transaction.findFirst({
-    where: { householdId, instrumentId: instrument.id, amount: alert.amount, date: { gte: date, lt: nextDay } },
-    select: { id: true },
+  // Already recorded -- the alert was forwarded twice, the purchase was typed
+  // in or sent from Telegram, or the statement was imported first (same
+  // amount on this card within a few days; see src/lib/duplicates.ts).
+  // Only a likely match is skipped; anything less certain is still added.
+  const existing = await findExistingDuplicate(householdId, {
+    date: dateStr,
+    amount: alert.amount,
+    currency,
+    instrumentId: instrument.id,
+    notes: alert.merchant ?? null,
+    source: "EMAIL",
   });
-  if (existing) return "duplicate";
+  if (existing?.match.confidence === "HIGH") return "duplicate";
 
   const [suggestion] = await suggestCategories(householdId, [alert.merchant ?? subject]);
   const category =

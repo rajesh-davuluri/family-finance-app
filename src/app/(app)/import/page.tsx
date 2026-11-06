@@ -20,6 +20,11 @@ type ExistingMatch = {
   categoryName: string;
   instrumentName: string;
   sameInstrument: boolean;
+  source: string;
+  // How sure the check is that this row is already in the app, and why.
+  confidence: "HIGH" | "MEDIUM";
+  daysApart: number;
+  reason: string;
 };
 
 type ImportRecord = {
@@ -60,7 +65,7 @@ function isAutoCategorized(r: PreviewRow) {
 }
 
 function isDuplicate(r: PreviewRow) {
-  return !!r.match && r.match.date === r.date && Math.round(r.match.amount * 100) === Math.round(r.amount * 100);
+  return !!r.match;
 }
 
 // Column names given to rows read from a PDF statement, so they flow through
@@ -259,7 +264,10 @@ export default function ImportPage() {
     const res = await fetch("/api/transactions/bulk/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instrumentId, rows: preview.map((r) => ({ date: r.date, amount: r.amount })) }),
+      body: JSON.stringify({
+        instrumentId,
+        rows: preview.map((r) => ({ date: r.date, amount: r.amount, description: r.rawDescription })),
+      }),
     });
     if (!res.ok) return null;
     const body = await res.json();
@@ -322,7 +330,8 @@ export default function ImportPage() {
     if (matches) {
       preview.forEach((r, i) => {
         r.match = matches[i] ?? null;
-        if (r.match) r.include = false;
+        // Likely duplicates start unchecked; possible ones stay checked but flagged.
+        if (r.match?.confidence === "HIGH") r.include = false;
       });
     } else {
       setError("Couldn't check for transactions already in the app — review the rows carefully before importing.");
@@ -566,9 +575,10 @@ export default function ImportPage() {
           {duplicateCount > 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <span>
-                {duplicateCount} of {rows.length} row{rows.length === 1 ? "" : "s"} match a transaction already in the app
-                (same date and amount). They&apos;re unchecked so they won&apos;t be imported again — tick any that are
-                genuinely new.
+                {duplicateCount} of {rows.length} row{rows.length === 1 ? "" : "s"} look like a transaction already in the
+                app (same amount on this account within a few days — e.g. typed in by hand or sent from Telegram before
+                the statement). Likely ones are unchecked so they won&apos;t be imported again; &ldquo;maybe&rdquo; ones stay
+                checked. Tick or untick as needed.
               </span>
               <label className="flex items-center gap-1.5 text-xs">
                 <input
@@ -702,11 +712,14 @@ export default function ImportPage() {
                           className="text-amber-800"
                           title={r.match.notes ? `Existing note: ${r.match.notes}` : undefined}
                         >
-                          Yes — {formatDate(r.match.date)}, {r.match.currency} {r.match.amount.toFixed(2)}
+                          {r.match.confidence === "HIGH" ? "Likely" : "Maybe"} — {formatDate(r.match.date)}, {r.match.currency}{" "}
+                          {r.match.amount.toFixed(2)}
                           <span className="block text-amber-700/80">
+                            {r.match.notes ? `“${r.match.notes.slice(0, 40)}” · ` : ""}
                             {r.match.categoryName} · {r.match.instrumentName}
                             {!r.match.sameInstrument && " (different account)"}
                           </span>
+                          <span className="block text-amber-700/70">{r.match.reason}</span>
                         </span>
                       ) : (
                         <span className="text-gray-400">New</span>
