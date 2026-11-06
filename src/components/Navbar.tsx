@@ -11,6 +11,7 @@ import NotificationBell from "@/components/NotificationBell";
 // which threw off the active-link underline alignment.
 const primaryLinks = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/paychecks", label: "Paychecks" },
   { href: "/transactions", label: "Transactions" },
   { href: "/budgets", label: "Budgets" },
   { href: "/debts", label: "Debts" },

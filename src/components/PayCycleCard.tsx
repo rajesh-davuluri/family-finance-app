@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { formatDate } from "@/lib/formatDate";
 
 type UpcomingBill = {
@@ -62,7 +63,12 @@ export default function PayCycleCard({ refreshKey }: { refreshKey?: number }) {
   return (
     <div className="rounded-lg border border-l-4 border-l-brand-500 bg-white p-4">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-medium text-gray-700">Current pay cycle</h2>
+        <h2 className="text-sm font-medium text-gray-700">
+          Current pay cycle{" "}
+          <Link href="/paychecks" className="ml-1 text-xs font-normal text-brand-600 hover:underline">
+            All paychecks →
+          </Link>
+        </h2>
         <p className="text-xs text-gray-500">
           Paid {lastPaycheck.currency} {Number(lastPaycheck.amount).toFixed(2)} on {formatDate(lastPaycheck.date)} (
           {lastPaycheck.instrumentName}) · next expected {formatDate(nextPaycheck.date)} (
