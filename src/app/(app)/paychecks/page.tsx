@@ -18,6 +18,8 @@ import {
 // (see src/lib/payCycles.ts); amounts are approximate USD.
 
 type Bill = { id: string; date: string; label: string; categoryName: string; instrumentName: string; amount: number; currency: string; usd: number };
+// A bill found in history rather than set up as a recurring template.
+type ExpectedBill = Omit<Bill, "id"> & { key: string; frequency: string };
 type Bank = { id: string; name: string; currency: string; balance: number | null; usd: number | null };
 type Data =
   | { hasData: false; today: string }
@@ -30,6 +32,8 @@ type Data =
       transactions: CycleTransaction[];
       truncated: boolean;
       upcomingBills: Bill[];
+      expectedBills: ExpectedBill[];
+      setAsidePerPaycheckUsd: number;
       bankBalances: Bank[];
     };
 
@@ -125,7 +129,11 @@ export default function PaychecksPage() {
   const isCurrent = cycle.isCurrent;
   const nextIn = daysBetween(today, cycle.nextPayday);
   const late = isCurrent && nextIn < 0;
-  const billsAhead = isCurrent ? data.upcomingBills : [];
+  const billsAhead: (Bill & { fromHistory?: boolean })[] = isCurrent
+    ? [...data.upcomingBills, ...data.expectedBills.map((b) => ({ ...b, id: b.key, fromHistory: true }))].sort((a, b) =>
+        a.date.localeCompare(b.date)
+      )
+    : [];
   const billsAheadUsd = billsAhead.reduce((s, b) => s + b.usd, 0);
   const afterBills = summary.leftOver - billsAheadUsd;
   const knownBanks = data.bankBalances.filter((b) => b.balance !== null);
@@ -284,11 +292,11 @@ export default function PaychecksPage() {
               <h2 className="font-medium">Before your next paycheck</h2>
               {billsAhead.length === 0 ? (
                 <p className="text-sm text-gray-500">
-                  No recurring bills due before {day(cycle.nextPayday)}.{" "}
+                  No bills expected before {day(cycle.nextPayday)}.{" "}
                   <Link href="/recurring" className="text-brand-600 hover:underline">
-                    Add recurring bills
-                  </Link>{" "}
-                  to see them here.
+                    See all recurring bills
+                  </Link>
+                  .
                 </p>
               ) : (
                 <ul className="divide-y text-sm">
@@ -298,6 +306,7 @@ export default function PaychecksPage() {
                         {b.label}
                         <span className="block text-xs text-gray-400">
                           {day(b.date)} · {b.instrumentName}
+                          {b.fromHistory && " · expected from your history"}
                         </span>
                       </span>
                       <span className="tabular-nums">{b.currency === "USD" ? usd(b.amount, true) : money(b.amount, b.currency)}</span>
@@ -311,6 +320,14 @@ export default function PaychecksPage() {
                   {signedUsd(afterBills)}
                 </span>
               </div>
+              {data.setAsidePerPaycheckUsd > 0 && (
+                <p className="text-xs text-gray-500">
+                  Your regular bills need about <strong>{usd(data.setAsidePerPaycheckUsd)}</strong> from each paycheck.{" "}
+                  <Link href="/recurring" className="text-brand-600 hover:underline">
+                    Details
+                  </Link>
+                </p>
+              )}
               {!late && summary.daysLeft > 0 && afterBills > 0 && (
                 <p className="text-xs text-gray-500">
                   About {usd(afterBills / summary.daysLeft)} a day for the {plural(summary.daysLeft, "day")} left.

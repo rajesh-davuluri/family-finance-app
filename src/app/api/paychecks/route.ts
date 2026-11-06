@@ -6,6 +6,8 @@ import { calendarDateInZone } from "@/lib/appTimezone";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { CycleTransaction, Payday, addDays, biweeklyPaydays, buildCycles, expectedPaydays, isSalary } from "@/lib/payCycles";
 import { countsAsSpending, kindOf } from "@/lib/categoryKind";
+import { detectHouseholdRecurring } from "@/lib/recurringData";
+import { dueBefore } from "@/lib/recurringDetect";
 
 // Data for the Paychecks page: the biweekly paydays (from actual Salary
 // transactions), every transaction since the first of them, bills due before
@@ -92,6 +94,27 @@ export async function GET() {
     usd: usd2(Number(t.amount), t.currency),
   }));
 
+  // Bills found in history (rent, loan EMIs, insurance...) expected before the
+  // next paycheck, and the set-aside they add up to per paycheck. Skips any
+  // already covered by a recurring template in the same category.
+  const { bills } = await detectHouseholdRecurring(householdId, today);
+  const templateCategories = new Set(upcomingBills.map((b) => b.categoryName));
+  const expectedBills = dueBefore(bills, today, nextPayday)
+    .filter((b) => b.kind !== "SAVINGS" && !templateCategories.has(b.categoryName))
+    .map((b) => ({
+      key: b.key,
+      date: b.nextDate,
+      label: b.label,
+      categoryName: b.categoryName,
+      instrumentName: b.instrumentName,
+      amount: b.amount,
+      currency: b.currency,
+      usd: b.usd,
+      frequency: b.frequency,
+    }));
+  const setAsidePerPaycheckUsd =
+    Math.round(bills.filter((b) => b.status !== "STOPPED").reduce((s, b) => s + b.perPaycheckUsd, 0) * 100) / 100;
+
   // Bank balances, only where an opening balance makes them knowable.
   const banks = await prisma.paymentInstrument.findMany({
     where: { householdId, type: "BANK_ACCOUNT", archived: false },
@@ -114,6 +137,8 @@ export async function GET() {
     transactions,
     truncated: rows.length > MAX_TRANSACTIONS,
     upcomingBills,
+    expectedBills,
+    setAsidePerPaycheckUsd,
     bankBalances,
   });
 }
