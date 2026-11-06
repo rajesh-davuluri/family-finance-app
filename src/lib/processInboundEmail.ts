@@ -137,6 +137,7 @@ export async function processInboundEmail(householdId: string, email: InboundEma
     });
     await tx.transaction.create({
       data: {
+        source: "EMAIL",
         amount: alert.amount,
         currency,
         date,

@@ -77,6 +77,7 @@ export async function POST(req: Request) {
         householdId: user.householdId,
         createdById: user.id,
         importBatchId: batch.id,
+        source: "IMPORTED",
       })),
     });
   });
