@@ -3,10 +3,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { TransactionDirection } from "@/lib/enums";
+import { CategoryKind, isKindAllowed, kindOf } from "@/lib/categoryKind";
 
 const createSchema = z.object({
   name: z.string().min(1),
   direction: TransactionDirection,
+  kind: CategoryKind.optional(),
 });
 
 export async function GET() {
@@ -17,7 +19,9 @@ export async function GET() {
     where: { householdId: user.householdId },
     orderBy: [{ direction: "asc" }, { name: "asc" }],
   });
-  return NextResponse.json(categories);
+  // effectiveKind is the stored kind, or the guess from the name when none
+  // has been chosen yet.
+  return NextResponse.json(categories.map((c) => ({ ...c, effectiveKind: kindOf(c), kindGuessed: !c.kind })));
 }
 
 export async function POST(req: Request) {
@@ -26,6 +30,10 @@ export async function POST(req: Request) {
 
   const parsed = createSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  if (parsed.data.kind && !isKindAllowed(parsed.data.kind, parsed.data.direction)) {
+    return NextResponse.json({ error: "That type doesn't fit an income/expense category." }, { status: 400 });
+  }
 
   const existing = await prisma.transactionCategory.findFirst({
     where: { householdId: user.householdId, name: parsed.data.name },

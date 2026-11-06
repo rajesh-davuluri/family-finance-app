@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { sourceOf } from "@/lib/lastActivity";
+import { kindOf } from "@/lib/categoryKind";
 import type { CardCheck, ReportTransaction } from "@/lib/reports";
 
 // Data for the Reports page: every transaction in a period (optionally one
@@ -41,7 +42,7 @@ export async function GET(req: Request) {
       ...(categoryId ? { categoryId } : {}),
     },
     include: {
-      category: { select: { name: true, direction: true } },
+      category: { select: { name: true, direction: true, kind: true } },
       instrument: { select: { name: true } },
       createdBy: { select: { name: true } },
       importBatch: { select: { fileName: true } },
@@ -60,6 +61,7 @@ export async function GET(req: Request) {
     categoryId: t.categoryId,
     categoryName: t.category.name,
     direction: t.category.direction === "INCOME" ? "INCOME" : "EXPENSE",
+    kind: kindOf(t.category),
     instrumentId: t.instrumentId,
     instrumentName: t.instrument.name,
     source: sourceOf(t),

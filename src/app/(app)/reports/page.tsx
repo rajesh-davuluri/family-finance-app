@@ -411,7 +411,11 @@ function ShareTable({
 
 function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> }) {
   const tiles = [
-    { label: "Spent", value: usd(summary.spent), sub: plural(summary.expenseCount, "transaction") },
+    {
+      label: "Spent",
+      value: usd(summary.spent),
+      sub: `${plural(summary.expenseCount, "transaction")}${summary.refunds > 0 ? ` · after ${usd(summary.refunds)} refunds` : ""}`,
+    },
     { label: "Received", value: usd(summary.received), sub: plural(summary.incomeCount, "transaction") },
     { label: "Net", value: `${summary.net < 0 ? "−" : ""}${usd(Math.abs(summary.net))}`, sub: "received − spent" },
     { label: "Daily average spent", value: usd(summary.dailyAverage), sub: `over ${summary.days} days` },
@@ -441,7 +445,16 @@ function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> 
           <ShareTable rows={summary.incomeByCategory} empty="No income in this period." tone="income" />
         </Panel>
       </div>
-      <p className="text-xs text-gray-400">Amounts in approximate USD, converted the same way as the Dashboard.</p>
+      <p className="text-xs text-gray-400">
+        {summary.saved > 0 && <>Saved or invested: {usd(summary.saved)} (not spending). </>}
+        {summary.notCounted.count > 0 && (
+          <>
+            Not counted as income or spending: {usd(summary.notCounted.usd)} in card payments, transfers and loans (
+            {plural(summary.notCounted.count, "transaction")}).{" "}
+          </>
+        )}
+        Amounts in approximate USD, converted the same way as the Dashboard.
+      </p>
     </div>
   );
 }

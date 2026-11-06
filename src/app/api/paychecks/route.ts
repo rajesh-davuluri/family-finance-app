@@ -4,7 +4,8 @@ import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
 import { calendarDateInZone } from "@/lib/appTimezone";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
-import { CycleTransaction, Payday, addDays, biweeklyPaydays, bucketOf, buildCycles, expectedPaydays } from "@/lib/payCycles";
+import { CycleTransaction, Payday, addDays, biweeklyPaydays, buildCycles, expectedPaydays, isSalary } from "@/lib/payCycles";
+import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 
 // Data for the Paychecks page: the biweekly paydays (from actual Salary
 // transactions), every transaction since the first of them, bills due before
@@ -23,11 +24,11 @@ export async function GET() {
 
   const incomeRows = await prisma.transaction.findMany({
     where: { householdId, category: { direction: "INCOME" } },
-    select: { id: true, date: true, amount: true, currency: true, category: { select: { name: true } } },
+    select: { id: true, date: true, amount: true, currency: true, category: { select: { name: true, direction: true, kind: true } } },
     orderBy: { date: "asc" },
   });
   const salaries: Payday[] = incomeRows
-    .filter((t) => bucketOf(t.category.name, "INCOME") === "SALARY")
+    .filter((t) => isSalary(kindOf(t.category), t.category.name))
     .map((t) => ({
       date: t.date.toISOString().slice(0, 10),
       amount: Number(t.amount),
@@ -49,7 +50,7 @@ export async function GET() {
       householdId,
       date: { gte: new Date(`${first}T00:00:00Z`), lt: new Date(`${addDays(until, 1)}T00:00:00Z`) },
     },
-    include: { category: { select: { name: true, direction: true } }, instrument: { select: { name: true } } },
+    include: { category: { select: { name: true, direction: true, kind: true } }, instrument: { select: { name: true } } },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     take: MAX_TRANSACTIONS + 1,
   });
@@ -63,6 +64,7 @@ export async function GET() {
     categoryId: t.categoryId,
     categoryName: t.category.name,
     direction: t.category.direction === "INCOME" ? "INCOME" : "EXPENSE",
+    kind: kindOf(t.category),
     instrumentName: t.instrument.name,
   }));
 
@@ -75,10 +77,11 @@ export async function GET() {
       nextRunAt: { gt: new Date(`${today}T00:00:00Z`), lt: new Date(`${nextPayday}T00:00:00Z`) },
       category: { direction: "EXPENSE" },
     },
-    include: { category: { select: { name: true } }, instrument: { select: { name: true } } },
+    include: { category: { select: { name: true, direction: true, kind: true } }, instrument: { select: { name: true } } },
     orderBy: { nextRunAt: "asc" },
   });
-  const upcomingBills = templates.map((t) => ({
+  // Only bills that are really spending -- not a scheduled savings transfer.
+  const upcomingBills = templates.filter((t) => countsAsSpending(kindOf(t.category))).map((t) => ({
     id: t.id,
     date: t.nextRunAt.toISOString().slice(0, 10),
     label: t.notes || t.category.name,

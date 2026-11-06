@@ -15,6 +15,7 @@ type PeriodSummary = {
   income: number;
   expense: number;
   net: number;
+  savings: number;
   expenseBreakdown: CategorySlice[];
   incomeBreakdown: CategorySlice[];
   instrumentBreakdown: CategorySlice[];
@@ -69,6 +70,18 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+// Savings and investing aren't spending, so they're left out of Expenses;
+// card payments, transfers and loans are left out of both.
+function SavedNote({ amount, explain = false }: { amount: number; explain?: boolean }) {
+  if (amount <= 0 && !explain) return null;
+  return (
+    <p className="text-xs text-gray-500 sm:col-span-3">
+      {amount > 0 ? `${amount.toLocaleString(undefined, { style: "currency", currency: "USD" })} saved or invested — not counted as spending. ` : ""}
+      {explain && "Card payments, transfers between your accounts and loans aren’t counted as income or spending."}
+    </p>
+  );
+}
 
 function SummaryCard({
   label,
@@ -383,6 +396,7 @@ export default function DashboardPage() {
               onClick={() => openPanel("monthly", "expense")}
             />
             <SummaryCard label="Net" value={data.monthly.net} tone="net" />
+            <SavedNote amount={data.monthly.savings} />
           </div>
         )}
       </div>
@@ -412,6 +426,7 @@ export default function DashboardPage() {
               onClick={() => openPanel("ytd", "expense")}
             />
             <SummaryCard label="Net" value={data.ytd.net} tone="net" />
+            <SavedNote amount={data.ytd.savings} explain />
           </div>
         )}
       </div>

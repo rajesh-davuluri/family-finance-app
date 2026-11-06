@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
+import { countsAsSpending, flowOf, kindOf } from "@/lib/categoryKind";
 import { calendarDateInZone } from "@/lib/appTimezone";
 
 // Month-by-month spending for the Dashboard's "Spending by month" section:
@@ -33,7 +34,7 @@ export async function GET(req: Request) {
 
   const txns = await prisma.transaction.findMany({
     where: { householdId: user.householdId, date: { gte: from, lt: to } },
-    select: { amount: true, currency: true, date: true, category: { select: { name: true, direction: true } } },
+    select: { amount: true, currency: true, date: true, category: { select: { name: true, direction: true, kind: true } } },
   });
 
   const buckets = new Map(
@@ -45,13 +46,13 @@ export async function GET(req: Request) {
   for (const t of txns) {
     const b = buckets.get(`${t.date.getUTCFullYear()}-${t.date.getUTCMonth() + 1}`);
     if (!b) continue;
-    const usd = toApproxUsd(Number(t.amount), t.currency);
-    if (t.category.direction === "INCOME") {
-      b.income += usd;
-    } else {
-      b.spent += usd;
+    const kind = kindOf(t.category);
+    const flow = flowOf(kind, toApproxUsd(Number(t.amount), t.currency));
+    b.income += flow.income;
+    if (countsAsSpending(kind)) {
+      b.spent += flow.spending;
       b.count += 1;
-      b.byCategory.set(t.category.name, (b.byCategory.get(t.category.name) ?? 0) + usd);
+      b.byCategory.set(t.category.name, (b.byCategory.get(t.category.name) ?? 0) + flow.spending);
     }
   }
 

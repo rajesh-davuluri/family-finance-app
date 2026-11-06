@@ -270,9 +270,9 @@ export default function PaychecksPage() {
               </tbody>
             </table>
           )}
-          {summary.loansNet !== 0 && (
+          {summary.notCountedNet !== 0 && (
             <p className="text-xs text-gray-500">
-              Not counted above: {signedUsd(summary.loansNet)} in loans borrowed, lent or repaid this cycle.
+              Not counted above: {signedUsd(summary.notCountedNet)} net in card payments, transfers and loans this cycle.
             </p>
           )}
         </section>
@@ -476,9 +476,12 @@ export default function PaychecksPage() {
           </p>
         )}
         <p>
-          Bills = rent, utilities, phone, insurance; Debt payments = loan/EMI categories; Savings = investment categories
-          — all decided by category name for now. Transfers between your own accounts are never counted. Amounts are
-          approximate USD.
+          Each category&rsquo;s type (Bill, Debt payment, Savings, Transfer…) decides where its transactions go — change
+          them in{" "}
+          <Link href="/categories" className="text-brand-600 hover:underline">
+            Categories
+          </Link>
+          . Refunds reduce spending; card payments, transfers and loans are never counted. Amounts are approximate USD.
         </p>
         {data.truncated && <p className="text-expense-600">Showing the most recent 5,000 transactions only.</p>}
       </div>

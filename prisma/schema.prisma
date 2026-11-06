@@ -112,6 +112,10 @@ model TransactionCategory {
   name      String
   direction String  // INCOME | EXPENSE — see src/lib/enums.ts
   isDefault Boolean @default(false)
+  // How its transactions count in totals: INCOME | REFUND | SPENDING | BILL |
+  // DEBT_PAYMENT | SAVINGS | TRANSFER | LOAN -- see src/lib/categoryKind.ts.
+  // Null means "not chosen yet": the kind is guessed from the name.
+  kind      String?
 
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
