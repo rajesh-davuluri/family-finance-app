@@ -359,6 +359,7 @@ async function commit(p: Pending, { accounts, categories }: Lists) {
     if (removed.count === 0) return false;
     await tx.transaction.create({
       data: {
+        source: "TELEGRAM",
         amount: p.amount,
         currency,
         date: p.date,

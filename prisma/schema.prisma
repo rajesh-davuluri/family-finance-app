@@ -147,6 +147,11 @@ model Transaction {
   recurringTemplateId String?
   recurringTemplate   RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // How it got into the app: MANUAL | IMPORTED | EMAIL | TELEGRAM | RECURRING
+  // (see src/lib/lastActivity.ts). Null on rows created before this was
+  // recorded -- those are inferred from importBatchId/recurringTemplateId.
+  source String?
+
   // Set when the transaction came from a CSV import, null when entered by hand.
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
