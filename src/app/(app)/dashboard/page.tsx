@@ -5,6 +5,7 @@ import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import SpendingByMonth from "@/components/SpendingByMonth";
+import PayCycleCard from "@/components/PayCycleCard";
 import { formatDate } from "@/lib/formatDate";
 import { LastActivity, SOURCE_LABELS, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
@@ -121,6 +122,10 @@ export default function DashboardPage() {
   // "Add Transaction" popup, launched from the button next to the page title.
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Bumped whenever a transaction is added, so the pay-cycle widget
+  // (which fetches its own data independently) refreshes too.
+  const [payCycleRefresh, setPayCycleRefresh] = useState(0);
+
   // Compact budget status widget -- independent of the month/year selector
   // above, since a budget is inherently a "this calendar month" concept.
   const [budgets, setBudgets] = useState<BudgetSummary[] | null>(null);
@@ -217,6 +222,7 @@ export default function DashboardPage() {
     loadSummary();
     loadBudgets();
     loadLastActivity();
+    setPayCycleRefresh((k) => k + 1);
     // A new transaction can change whatever breakdown/drill-down was open,
     // so close those rather than show stale figures.
     setExpandedPanel(null);
@@ -299,6 +305,8 @@ export default function DashboardPage() {
           Add Transaction
         </button>
       </div>
+
+      <PayCycleCard refreshKey={payCycleRefresh} />
 
       {lastActivity && <LastAddedLine lastActivity={lastActivity} />}
       {lastActivity && lastActivity.instruments.length > 0 && (
