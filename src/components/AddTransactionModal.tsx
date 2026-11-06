@@ -2,10 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
-import { getTodayLocal } from "@/lib/formatDate";
+import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
+type DuplicateInfo = {
+  id: string;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  categoryName: string;
+  instrumentName: string;
+  source: string;
+  reason: string;
+};
+const SOURCE_WORDS: Record<string, string> = {
+  IMPORTED: "imported from a statement",
+  EMAIL: "from an email alert",
+  TELEGRAM: "sent from Telegram",
+  RECURRING: "from a recurring template",
+  MANUAL: "added by hand",
+};
 
 export type EditableTransaction = {
   id: string;
@@ -34,6 +52,8 @@ export default function AddTransactionModal({
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // An existing transaction this one looks like a copy of (from the server's duplicate check).
+  const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     amount: "",
@@ -53,6 +73,7 @@ export default function AddTransactionModal({
   useEffect(() => {
     if (!open) return;
     setError(null);
+    setDuplicate(null);
     setLoading(true);
     Promise.all([fetch("/api/categories"), fetch("/api/instruments")]).then(async ([catRes, instRes]) => {
       const cats = await catRes.json();
@@ -80,9 +101,10 @@ export default function AddTransactionModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingTransaction?.id]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
     setError(null);
+    setDuplicate(null);
     if (!form.categoryId || !form.instrumentId) {
       setError("Add a category and a payment instrument first (see the Categories / Instruments pages).");
       return;
@@ -91,15 +113,26 @@ export default function AddTransactionModal({
     const res = await fetch(isEditing ? `/api/transactions/${editingTransaction!.id}` : "/api/transactions", {
       method: isEditing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
+      body: JSON.stringify({
+        ...form,
+        amount: parseFloat(form.amount),
+        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
       const body = await res.json();
-      setError(typeof body.error === "string" ? body.error : `Couldn't ${isEditing ? "save" : "add"} that transaction.`);
+      if (res.status === 409 && body.duplicate) {
+        setDuplicate(body.duplicate);
+        return;
+      }
+      setError(
+        typeof body.error === "string" ? body.error : `Couldn't ${isEditing ? "save" : "add"} that transaction.`,
+      );
       return;
     }
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setDuplicate(null);
     onSuccess();
   }
 
@@ -189,6 +222,37 @@ export default function AddTransactionModal({
                 className="rounded-md border px-3 py-2 text-sm"
               />
               {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
+              {duplicate && (
+                <div
+                  className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-2"
+                  role="alert"
+                >
+                  <p className="font-medium">This looks like it&rsquo;s already recorded:</p>
+                  <p className="mt-1">
+                    {formatDate(duplicate.date)} · {duplicate.currency} {duplicate.amount.toFixed(2)}
+                    {duplicate.notes ? ` · “${duplicate.notes}”` : ""} · {duplicate.categoryName} ·{" "}
+                    {duplicate.instrumentName}
+                    {SOURCE_WORDS[duplicate.source] ? ` (${SOURCE_WORDS[duplicate.source]})` : ""}
+                  </p>
+                  <p className="mt-1 text-xs text-amber-800">{duplicate.reason}.</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
+                      className="rounded-md border border-amber-400 bg-white px-3 py-1 text-xs hover:bg-amber-100"
+                    >
+                      Add anyway
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-md px-3 py-1 text-xs text-amber-900 hover:underline"
+                    >
+                      Don&rsquo;t add
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end gap-2 sm:col-span-2">
                 <button
                   type="button"

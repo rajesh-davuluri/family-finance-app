@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { findExistingDuplicate } from "@/lib/duplicateData";
 import { InlineButton, editMessage, sendMessage, telegramApi, userForLinkCode, webhookSecretValid } from "@/lib/telegram";
 import { MAX_ENTRIES_PER_MESSAGE, ParseAccount, ParseCategory, parseQuickEntry, splitEntries } from "@/lib/telegramParse";
 import { suggestCategories } from "@/lib/categorize";
@@ -254,16 +255,18 @@ async function summary(pendingId: string) {
   const currency = p.currency || account?.currency || "";
   const date = p.date.toISOString().slice(0, 10);
 
-  let duplicate = false;
-  if (account) {
-    const day = new Date(`${date}T00:00:00Z`);
-    const next = new Date(day);
-    next.setUTCDate(next.getUTCDate() + 1);
-    duplicate = !!(await prisma.transaction.findFirst({
-      where: { householdId: p.householdId, instrumentId: account.id, amount: p.amount, date: { gte: day, lt: next } },
-      select: { id: true },
+  // Already recorded? (Same amount on this card within a few days -- e.g. the
+  // statement was imported first. See src/lib/duplicates.ts.)
+  const duplicate =
+    account &&
+    (await findExistingDuplicate(p.householdId, {
+      date,
+      amount: Number(p.amount),
+      currency: currency || account.currency,
+      instrumentId: account.id,
+      notes: p.notes,
+      source: "TELEGRAM",
     }));
-  }
 
   const lines = [
     `${currency ? `${currency} ` : ""}${Number(p.amount).toFixed(2)}${p.notes ? ` · ${p.notes}` : ""}`,
@@ -271,7 +274,14 @@ async function summary(pendingId: string) {
     account ? `💳 ${account.name}${account.last4 ? ` ••${account.last4}` : ""}` : "💳 Which card? Tap “Card” below.",
     category ? `🏷 ${category.name}` : "🏷 Which category? Tap “Category” below.",
   ];
-  if (duplicate) lines.push("\n⚠️ A transaction with the same card, date and amount is already recorded.");
+  if (duplicate) {
+    const e = duplicate.existing;
+    lines.push(
+      `\n⚠️ ${duplicate.match.confidence === "HIGH" ? "Looks already recorded" : "Possibly already recorded"}: ${e.date} · ${e.currency} ${e.amount.toFixed(2)}${
+        e.notes ? ` · ${e.notes.slice(0, 40)}` : ""
+      } (${e.categoryName}). Tap Cancel if it's the same purchase.`
+    );
+  }
 
   const buttons: InlineButton[][] = [];
   if (account && category) buttons.push([{ text: "✅ Add", callback_data: `a:${p.id}` }]);

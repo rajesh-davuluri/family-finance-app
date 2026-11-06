@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import AddTransactionModal, { EditableTransaction } from "@/components/AddTransactionModal";
+import DuplicateReview from "@/components/DuplicateReview";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { SOURCE_LABELS, sourceOf } from "@/lib/lastActivity";
 
@@ -32,6 +33,17 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [txnsLoading, setTxnsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the server thinks the new transaction is already recorded.
+  const [duplicate, setDuplicate] = useState<{
+    date: string;
+    amount: number;
+    currency: string;
+    notes: string | null;
+    instrumentName: string;
+    reason: string;
+  } | null>(null);
+  // Bumped whenever transactions change, so the duplicate review re-checks.
+  const [changes, setChanges] = useState(0);
   const [filter, setFilter] = useState<"ALL" | "INCOME" | "EXPENSE">("ALL");
 
   // Search criteria: date range, card/instrument, category. All optional --
@@ -63,6 +75,7 @@ export default function TransactionsPage() {
     const res = await fetch(`/api/transactions?${params.toString()}`);
     setTransactions(await res.json());
     setTxnsLoading(false);
+    setChanges((c) => c + 1);
   }
 
   async function loadAll() {
@@ -97,9 +110,10 @@ export default function TransactionsPage() {
     loadTransactions(EMPTY_SEARCH);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
     setError(null);
+    setDuplicate(null);
     if (!form.categoryId || !form.instrumentId) {
       setError("Add a category and a payment instrument first (see the Categories / Instruments pages).");
       return;
@@ -108,11 +122,19 @@ export default function TransactionsPage() {
     const res = await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
+      body: JSON.stringify({
+        ...form,
+        amount: parseFloat(form.amount),
+        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
       const body = await res.json();
+      if (res.status === 409 && body.duplicate) {
+        setDuplicate(body.duplicate);
+        return;
+      }
       setError(typeof body.error === "string" ? body.error : "Couldn't save that transaction.");
       return;
     }
@@ -142,6 +164,8 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Transactions</h1>
+
+      <DuplicateReview refreshKey={changes} onRemoved={() => loadTransactions()} />
 
       <AddTransactionModal
         open={!!editingTransaction}
@@ -232,6 +256,29 @@ export default function TransactionsPage() {
           {submitting ? "Adding..." : "Add transaction"}
         </button>
         {error && <p className="text-sm text-red-600 sm:col-span-6">{error}</p>}
+        {duplicate && (
+          <div
+            className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-6"
+            role="alert"
+          >
+            <span className="font-medium">This looks like it&rsquo;s already recorded:</span>{" "}
+            {formatDate(duplicate.date)} · {duplicate.currency} {duplicate.amount.toFixed(2)}
+            {duplicate.notes ? ` · “${duplicate.notes}”` : ""} · {duplicate.instrumentName}{" "}
+            <span className="text-xs text-amber-800">({duplicate.reason})</span>
+            <span className="ml-2 inline-flex gap-2">
+              <button
+                type="button"
+                onClick={(e) => handleSubmit(e as unknown as React.FormEvent, true)}
+                className="rounded-md border border-amber-400 bg-white px-2 py-0.5 text-xs hover:bg-amber-100"
+              >
+                Add anyway
+              </button>
+              <button type="button" onClick={() => setDuplicate(null)} className="text-xs hover:underline">
+                Don&rsquo;t add
+              </button>
+            </span>
+          </div>
+        )}
       </form>
 
       {/* Search criteria */}

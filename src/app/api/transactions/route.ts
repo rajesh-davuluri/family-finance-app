@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { describeExisting, findExistingDuplicate } from "@/lib/duplicateData";
 import { Currency } from "@/lib/enums";
 import { notifyHousehold } from "@/lib/notify";
 
@@ -12,6 +13,8 @@ const createSchema = z.object({
   notes: z.string().optional(),
   categoryId: z.string(),
   instrumentId: z.string(),
+  // Set after the person has seen the duplicate warning and chosen to add it anyway.
+  allowDuplicate: z.boolean().optional(),
 });
 
 export async function GET(req: Request) {
@@ -65,6 +68,25 @@ export async function POST(req: Request) {
   }
   if (!instrument || instrument.householdId !== user.householdId) {
     return NextResponse.json({ error: "Invalid payment instrument." }, { status: 400 });
+  }
+
+  // Likely already recorded (e.g. imported from the statement, or sent from
+  // Telegram)? Ask first instead of adding a second copy.
+  if (!data.allowDuplicate) {
+    const dup = await findExistingDuplicate(user.householdId, {
+      date: data.date.slice(0, 10),
+      amount: data.amount,
+      currency: data.currency,
+      instrumentId: data.instrumentId,
+      notes: data.notes ?? null,
+      source: "MANUAL",
+    });
+    if (dup && dup.match.confidence === "HIGH") {
+      return NextResponse.json(
+        { error: "This looks like it's already recorded.", duplicate: { ...describeExisting(dup.existing), reason: dup.match.reason } },
+        { status: 409 }
+      );
+    }
   }
 
   const transaction = await prisma.transaction.create({
