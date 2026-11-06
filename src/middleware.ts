@@ -17,5 +17,6 @@ export const config = {
     "/household/:path*",
     "/settings/:path*",
     "/reports/:path*",
+    "/paychecks/:path*",
   ],
 };
