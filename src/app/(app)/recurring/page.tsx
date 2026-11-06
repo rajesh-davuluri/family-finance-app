@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import DetectedBills from "@/components/DetectedBills";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; archived: boolean };
@@ -118,7 +119,7 @@ export default function RecurringPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Recurring transactions</h1>
+        <h1 className="text-xl font-semibold">Recurring bills</h1>
         <button
           onClick={generateNow}
           disabled={generating}
@@ -127,6 +128,9 @@ export default function RecurringPage() {
           {generating ? "Generating..." : "Generate now"}
         </button>
       </div>
+      <DetectedBills />
+
+      <h2 className="pt-2 font-medium">Scheduled transactions</h2>
       <p className="text-sm text-gray-500">
         Templates for bills or income that repeat automatically. On a deployed site, these generate on a schedule (see
         the README&apos;s Vercel Cron setup) — locally, use &quot;Generate now&quot; to trigger it manually.
