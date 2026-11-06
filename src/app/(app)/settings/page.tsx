@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Analytics } from "@vercel/analytics/next"
 import { GMAIL_LABEL, buildGmailScript } from "@/lib/gmailScript";
 
 type TelegramStatus =
@@ -311,7 +310,7 @@ export default function SettingsPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qrDataUrl} alt="MFA QR code" className="h-40 w-40" />
             <p className="text-xs text-gray-400">
-              Can't scan? Enter this key manually: <code className="rounded bg-gray-100 px-1">{secret}</code>
+              Can&apos;t scan? Enter this key manually: <code className="rounded bg-gray-100 px-1">{secret}</code>
             </p>
             <div className="flex items-center gap-2">
               <input

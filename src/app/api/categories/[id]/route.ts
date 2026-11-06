@@ -27,8 +27,9 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
   try {
     await deleteCategoryCascade(id, parsed.data.reassignToCategoryId);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 409 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 409 });
   }
   return NextResponse.json({ ok: true });
 }

@@ -76,8 +76,8 @@ function normalizeDate(raw: string): string {
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
   if (slash) {
-    let [, m, d, y] = slash;
-    if (y.length === 2) y = `20${y}`;
+    const [, m, d, yy] = slash;
+    const y = yy.length === 2 ? `20${yy}` : yy;
     return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
   }
   // Today on this device's clock -- toISOString() would be UTC, which is

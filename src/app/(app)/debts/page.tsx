@@ -150,7 +150,7 @@ export default function DebtsPage() {
         <p className="mt-1 font-display text-2xl font-semibold text-expense-600">${totalOwedUsd.toFixed(2)}</p>
         {debts.some((d) => d.currency !== "USD") && (
           <p className="mt-1 text-xs text-gray-400">
-            Converted using each debt's recorded rate where set, otherwise an approximate rate — each debt below still shows its real balance in its own currency.
+            Converted using each debt&apos;s recorded rate where set, otherwise an approximate rate — each debt below still shows its real balance in its own currency.
           </p>
         )}
       </div>

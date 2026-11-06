@@ -139,7 +139,7 @@ export default function ReportsPage() {
     if (r) setRange(r);
   }
 
-  const txns = data?.transactions ?? [];
+  const txns = useMemo(() => data?.transactions ?? [], [data]);
   const summary = useMemo(() => spendingSummary(txns, range.from, range.to), [txns, range]);
   const months = useMemo(() => monthVsMonth(txns, range.from, range.to), [txns, range]);
   const listed = useMemo(() => filterTransactions(txns, { type: txType, search }), [txns, txType, search]);

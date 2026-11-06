@@ -4,7 +4,6 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Analytics } from "@vercel/analytics/next"
 
 export default function SignupPage() {
   const router = useRouter();
@@ -55,7 +54,7 @@ export default function SignupPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
       <div className="w-full max-w-sm rounded-lg border bg-white p-6 shadow-sm">
         <h1 className="mb-1 text-xl font-semibold">Create your account</h1>
-        <p className="mb-4 text-sm text-gray-500">Start a new household, or join one you've been invited to.</p>
+        <p className="mb-4 text-sm text-gray-500">Start a new household, or join one you&apos;ve been invited to.</p>
 
         <div className="mb-4 flex rounded-md border p-1 text-sm">
           <button

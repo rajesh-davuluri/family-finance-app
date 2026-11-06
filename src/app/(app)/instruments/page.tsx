@@ -341,8 +341,8 @@ export default function InstrumentsPage() {
       </div>
 
       <p className="text-xs text-gray-400">
-        "Set balance" records an amount as of a date (e.g. your savings balance today) — the app then tracks it
-        forward using every transaction and transfer touching that instrument from that date on. It doesn't touch
+        &quot;Set balance&quot; records an amount as of a date (e.g. your savings balance today) — the app then tracks it
+        forward using every transaction and transfer touching that instrument from that date on. It doesn&apos;t touch
         activity from before that date.
       </p>
 
@@ -353,7 +353,7 @@ export default function InstrumentsPage() {
           <h2 className="text-lg font-semibold">Transfers</h2>
           <p className="text-sm text-gray-500">
             For moving money between your own accounts — like paying a credit card bill from your bank account.
-            This updates both instruments' balances but never shows up as income or an expense, since the actual
+            This updates both instruments&apos; balances but never shows up as income or an expense, since the actual
             spending was already logged as transactions against the card.
           </p>
         </div>

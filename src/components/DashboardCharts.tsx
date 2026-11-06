@@ -36,7 +36,7 @@ export function CategoryBarChart({
             dataKey="total"
             radius={[4, 4, 0, 0]}
             cursor={onCategoryClick ? "pointer" : undefined}
-            onClick={(entry: any) => onCategoryClick?.(entry as CategorySlice)}
+            onClick={(entry) => onCategoryClick?.(entry as unknown as CategorySlice)}
           >
             {data.map((entry) => (
               <Cell key={entry.id} fill={entry.id === selectedCategoryId ? colors.selected : colors.base} />

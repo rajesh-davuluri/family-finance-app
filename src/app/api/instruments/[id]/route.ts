@@ -50,8 +50,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   try {
     await deleteInstrumentCascade(id);
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 409 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 409 });
   }
   return NextResponse.json({ ok: true });
 }

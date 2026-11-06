@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
@@ -10,7 +11,7 @@ import { toApproxUsd } from "@/lib/fx";
 // together in one call since they're always shown side by side.
 
 type Txn = {
-  amount: any;
+  amount: Prisma.Decimal;
   currency: string;
   category: { id: string; direction: string; name: string };
   instrument: { id: string; name: string };

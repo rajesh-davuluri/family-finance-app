@@ -129,7 +129,7 @@ export default function RecurringPage() {
       </div>
       <p className="text-sm text-gray-500">
         Templates for bills or income that repeat automatically. On a deployed site, these generate on a schedule (see
-        the README's Vercel Cron setup) — locally, use "Generate now" to trigger it manually.
+        the README&apos;s Vercel Cron setup) — locally, use &quot;Generate now&quot; to trigger it manually.
       </p>
       {genMessage && <p className="text-sm text-brand-700">{genMessage}</p>}
 

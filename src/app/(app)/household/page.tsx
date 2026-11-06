@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Analytics } from "@vercel/analytics/next";
 import { formatDateTime } from "@/lib/lastActivity";
 
 type Member = {
@@ -29,7 +28,7 @@ export default function HouseholdPage() {
   }, []);
 
   if (loading) return <p className="text-sm text-gray-400">Loading...</p>;
-  if (!household) return <p className="text-sm text-red-600">Couldn't load household info.</p>;
+  if (!household) return <p className="text-sm text-red-600">Couldn&apos;t load household info.</p>;
 
   function copyCode() {
     navigator.clipboard.writeText(household!.inviteCode);
@@ -44,7 +43,7 @@ export default function HouseholdPage() {
       <div className="rounded-lg border bg-white p-4">
         <h2 className="mb-1 text-sm font-medium text-gray-700">Invite code</h2>
         <p className="mb-3 text-sm text-gray-500">
-          Share this with family members so they can join your household during signup ("Join household" tab).
+          Share this with family members so they can join your household during signup (&quot;Join household&quot; tab).
         </p>
         <div className="flex items-center gap-2">
           <code className="rounded bg-gray-100 px-3 py-1.5 text-sm">{household.inviteCode}</code>
