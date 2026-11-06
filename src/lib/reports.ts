@@ -4,6 +4,11 @@
 // (like the Dashboard); the transaction list keeps original currencies.
 
 import { merchantKeys } from "@/lib/merchantKey";
+import { CategoryKind, countsAsSpending, flowOf } from "@/lib/categoryKind";
+
+// Spending follows each category's kind (src/lib/categoryKind.ts): refunds
+// reduce it, and savings, card payments/transfers and loans aren't part of it.
+const spend = (t: ReportTransaction) => flowOf(t.kind, t.usd).spending;
 
 export type ReportTransaction = {
   id: string;
@@ -15,6 +20,7 @@ export type ReportTransaction = {
   categoryId: string;
   categoryName: string;
   direction: "INCOME" | "EXPENSE";
+  kind: CategoryKind;
   instrumentId: string;
   instrumentName: string;
   source: string;
@@ -83,35 +89,42 @@ function topMerchants(expenses: ReportTransaction[]): Slice[] {
 }
 
 export function spendingSummary(txns: ReportTransaction[], from: string, to: string) {
-  const expenses = txns.filter((t) => t.direction === "EXPENSE");
-  const income = txns.filter((t) => t.direction === "INCOME");
-  const spent = round(expenses.reduce((s, t) => s + t.usd, 0));
+  const spendingRows = txns.filter((t) => countsAsSpending(t.kind));
+  const purchases = spendingRows.filter((t) => t.kind !== "REFUND");
+  const income = txns.filter((t) => t.kind === "INCOME");
+  const spent = round(spendingRows.reduce((s, t) => s + spend(t), 0));
   const received = round(income.reduce((s, t) => s + t.usd, 0));
+  const saved = round(txns.reduce((s, t) => s + flowOf(t.kind, t.usd).savings, 0));
+  const refunds = round(txns.filter((t) => t.kind === "REFUND").reduce((s, t) => s + t.usd, 0));
+  const notCounted = txns.filter((t) => t.kind === "TRANSFER" || t.kind === "LOAN");
 
-  const group = (rows: ReportTransaction[], keyOf: (t: ReportTransaction) => [string, string]) => {
+  const group = (rows: ReportTransaction[], keyOf: (t: ReportTransaction) => [string, string], value: (t: ReportTransaction) => number) => {
     const m = new Map<string, { label: string; total: number; count: number }>();
     for (const t of rows) {
       const [key, label] = keyOf(t);
       const g = m.get(key) ?? { label, total: 0, count: 0 };
-      g.total += t.usd;
+      g.total += value(t);
       g.count += 1;
       m.set(key, g);
     }
-    return slices(m);
+    return slices(m).filter((g) => g.total !== 0);
   };
 
   return {
     spent,
     received,
     net: round(received - spent),
-    expenseCount: expenses.length,
+    saved,
+    refunds,
+    notCounted: { count: notCounted.length, usd: round(notCounted.reduce((s, t) => s + t.usd, 0)) },
+    expenseCount: purchases.length,
     incomeCount: income.length,
     days: daysBetween(from, to),
     dailyAverage: round(spent / Math.max(1, daysBetween(from, to))),
-    byCategory: group(expenses, (t) => [t.categoryId, t.categoryName]),
-    byAccount: group(expenses, (t) => [t.instrumentId, t.instrumentName]),
-    topMerchants: topMerchants(expenses),
-    incomeByCategory: group(income, (t) => [t.categoryId, t.categoryName]),
+    byCategory: group(spendingRows, (t) => [t.categoryId, t.categoryName], spend),
+    byAccount: group(spendingRows, (t) => [t.instrumentId, t.instrumentName], spend),
+    topMerchants: topMerchants(purchases),
+    incomeByCategory: group(income, (t) => [t.categoryId, t.categoryName], (t) => t.usd),
   };
 }
 
@@ -138,12 +151,12 @@ export function monthVsMonth(txns: ReportTransaction[], from: string, to: string
   const rows = new Map<string, { label: string; byMonth: number[] }>();
   const totals = months.map(() => 0);
   for (const t of txns) {
-    if (t.direction !== "EXPENSE") continue;
+    if (!countsAsSpending(t.kind)) continue;
     const i = months.indexOf(t.date.slice(0, 7));
     if (i < 0) continue;
     const row = rows.get(t.categoryId) ?? { label: t.categoryName, byMonth: months.map(() => 0) };
-    row.byMonth[i] += t.usd;
-    totals[i] += t.usd;
+    row.byMonth[i] += spend(t);
+    totals[i] += spend(t);
     rows.set(t.categoryId, row);
   }
   const categories = Array.from(rows.entries())

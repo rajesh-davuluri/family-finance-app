@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
+import { countsAsSpending, flowOf, kindOf } from "@/lib/categoryKind";
 import { addDays, daysUntil, PAY_INTERVAL_DAYS } from "@/lib/payCycle";
 
 // Powers the "Current Pay Cycle" dashboard widget.
@@ -47,12 +48,17 @@ export async function GET() {
     include: { category: true },
   });
 
+  // Each category's kind decides how it counts: refunds reduce spending,
+  // savings stay out of it, and card payments / transfers / loans count in
+  // neither (src/lib/categoryKind.ts).
   let spentSoFarUsd = 0;
   let otherIncomeUsd = 0;
+  let savedUsd = 0;
   for (const t of periodTxns) {
-    const usd = toApproxUsd(Number(t.amount), t.currency);
-    if (t.category.direction === "EXPENSE") spentSoFarUsd += usd;
-    else otherIncomeUsd += usd;
+    const flow = flowOf(kindOf(t.category), toApproxUsd(Number(t.amount), t.currency));
+    spentSoFarUsd += flow.spending;
+    otherIncomeUsd += flow.income;
+    savedUsd += flow.savings;
   }
 
   // Bills still due before the next paycheck lands, from active recurring
@@ -68,7 +74,7 @@ export async function GET() {
   });
 
   const upcomingBills = upcomingTemplates
-    .filter((t) => t.category.direction === "EXPENSE")
+    .filter((t) => countsAsSpending(kindOf(t.category)))
     .map((t) => ({
       id: t.id,
       categoryName: t.category.name,
@@ -85,7 +91,8 @@ export async function GET() {
   );
 
   const paycheckUsd = toApproxUsd(Number(lastPaycheck.amount), lastPaycheck.currency);
-  const availableNowUsd = paycheckUsd + otherIncomeUsd - spentSoFarUsd;
+  // Money already moved to savings is no longer available to spend.
+  const availableNowUsd = paycheckUsd + otherIncomeUsd - spentSoFarUsd - savedUsd;
   const availableAfterBillsUsd = availableNowUsd - upcomingCommittedUsd;
 
   const round2 = (n: number) => Math.round(n * 100) / 100;

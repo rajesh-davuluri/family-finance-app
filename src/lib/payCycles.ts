@@ -12,6 +12,10 @@
 //   logged once a month (e.g. $6,200 on the 1st) can't be split into real
 //   pay cycles, so those months stay in the monthly reports instead.
 // - Money is compared in approximate USD, like the rest of the dashboard.
+// - How each transaction counts follows its category's kind
+//   (src/lib/categoryKind.ts).
+
+import { CategoryKind } from "@/lib/categoryKind";
 
 export const PAY_INTERVAL_DAYS = 14;
 // Gaps up to this long still count as the same biweekly run (a paycheck a
@@ -28,6 +32,7 @@ export type CycleTransaction = {
   categoryId: string;
   categoryName: string;
   direction: "INCOME" | "EXPENSE";
+  kind: CategoryKind;
   instrumentName: string;
 };
 
@@ -129,7 +134,7 @@ export function buildCycles(paydays: Payday[]): Cycle[] {
 
 // --- where the money went ---------------------------------------------------
 
-export type Bucket = "SALARY" | "OTHER_INCOME" | "BILLS" | "DEBT" | "SAVINGS" | "SPENDING" | "LOAN";
+export type Bucket = "SALARY" | "OTHER_INCOME" | "BILLS" | "DEBT" | "SAVINGS" | "SPENDING" | "NOT_COUNTED";
 
 export const BUCKET_LABELS: Record<Bucket, string> = {
   SALARY: "Salary",
@@ -138,20 +143,31 @@ export const BUCKET_LABELS: Record<Bucket, string> = {
   DEBT: "Debt payments",
   SAVINGS: "Savings & investing",
   SPENDING: "Everyday spending",
-  LOAN: "Loans given / received",
+  NOT_COUNTED: "Card payments, transfers & loans",
 };
 
-// Until categories carry an explicit type, the bucket comes from the
-// category's name. Kept in one place so it's easy to see and adjust.
-export function bucketOf(categoryName: string, direction: "INCOME" | "EXPENSE"): Bucket {
-  const n = categoryName.toLowerCase();
-  // Borrowing, lending and repayments move money but aren't income or spending.
-  if (/\b(hand loan|loan repayment|money lent|lent|borrow)/.test(n)) return "LOAN";
-  if (direction === "INCOME") return /salary|paycheck|payroll/.test(n) ? "SALARY" : "OTHER_INCOME";
-  if (/invest|saving|retire|401k|brokerage|\bira\b/.test(n)) return "SAVINGS";
-  if (/loan|emi|debt/.test(n)) return "DEBT";
-  if (/rent|mortgage|utilit|insurance|phone|mobile|internet|electric|water/.test(n)) return "BILLS";
-  return "SPENDING";
+export function isSalary(kind: CategoryKind, categoryName: string) {
+  return kind === "INCOME" && /salary|paycheck|payroll/i.test(categoryName);
+}
+
+// Which part of a paycheck a transaction belongs to. Refunds go back into
+// everyday spending (as a negative); transfers and loans count nowhere.
+export function bucketOf(kind: CategoryKind, categoryName: string): Bucket {
+  switch (kind) {
+    case "INCOME":
+      return isSalary(kind, categoryName) ? "SALARY" : "OTHER_INCOME";
+    case "BILL":
+      return "BILLS";
+    case "DEBT_PAYMENT":
+      return "DEBT";
+    case "SAVINGS":
+      return "SAVINGS";
+    case "SPENDING":
+    case "REFUND":
+      return "SPENDING";
+    default:
+      return "NOT_COUNTED";
+  }
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -160,14 +176,16 @@ export type CategorySlice = { categoryId: string; label: string; bucket: Bucket;
 
 export function summarizeCycle(cycle: Cycle, txns: CycleTransaction[], today: string) {
   const inCycle = txns.filter((t) => t.date >= cycle.start && t.date <= cycle.end);
-  const totals: Record<Bucket, number> = { SALARY: 0, OTHER_INCOME: 0, BILLS: 0, DEBT: 0, SAVINGS: 0, SPENDING: 0, LOAN: 0 };
+  const totals: Record<Bucket, number> = { SALARY: 0, OTHER_INCOME: 0, BILLS: 0, DEBT: 0, SAVINGS: 0, SPENDING: 0, NOT_COUNTED: 0 };
   const cats = new Map<string, { label: string; bucket: Bucket; total: number; count: number }>();
   for (const t of inCycle) {
-    const bucket = bucketOf(t.categoryName, t.direction);
-    totals[bucket] += bucket === "LOAN" && t.direction === "EXPENSE" ? -t.usd : t.usd;
-    if (t.direction === "EXPENSE" && bucket !== "LOAN") {
+    const bucket = bucketOf(t.kind, t.categoryName);
+    // Money back (refunds, transfers/loans received) is negative here.
+    const value = t.kind === "REFUND" || (bucket === "NOT_COUNTED" && t.direction === "INCOME") ? -t.usd : t.usd;
+    totals[bucket] += value;
+    if (bucket === "BILLS" || bucket === "DEBT" || bucket === "SAVINGS" || bucket === "SPENDING") {
       const c = cats.get(t.categoryId) ?? { label: t.categoryName, bucket, total: 0, count: 0 };
-      c.total += t.usd;
+      c.total += value;
       c.count += 1;
       cats.set(t.categoryId, c);
     }
@@ -188,6 +206,7 @@ export function summarizeCycle(cycle: Cycle, txns: CycleTransaction[], today: st
   const expenseSum = Array.from(cats.values()).reduce((s, c) => s + c.total, 0) || 1;
   const byCategory: CategorySlice[] = Array.from(cats.entries())
     .map(([categoryId, c]) => ({ categoryId, label: c.label, bucket: c.bucket, total: round(c.total), count: c.count, share: c.total / expenseSum }))
+    .filter((c) => c.total !== 0)
     .sort((a, b) => b.total - a.total);
 
   const length = daysBetween(cycle.start, cycle.end) + 1;
@@ -205,8 +224,9 @@ export function summarizeCycle(cycle: Cycle, txns: CycleTransaction[], today: st
     spent,
     outTotal,
     leftOver,
-    // Borrowed/lent/repaid in this cycle: shown separately, never in the totals above.
-    loansNet: round(totals.LOAN),
+    // Card payments, transfers and loans: money out minus money in, shown
+    // separately and never in the totals above.
+    notCountedNet: round(totals.NOT_COUNTED),
     byCategory,
     transactions: inCycle,
     days: length,

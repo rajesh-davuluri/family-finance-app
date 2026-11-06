@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
+import { countsAsSpending, flowOf, kindOf } from "@/lib/categoryKind";
 
 // Powers the dashboard: a month/year-selectable monthly summary, a
 // year-to-date summary for the same year, an expense/income-by-category
@@ -13,43 +14,50 @@ import { toApproxUsd } from "@/lib/fx";
 type Txn = {
   amount: Prisma.Decimal;
   currency: string;
-  category: { id: string; direction: string; name: string };
+  category: { id: string; direction: string; name: string; kind: string | null };
   instrument: { id: string; name: string };
 };
 
+// Income, spending and savings follow each category's kind
+// (src/lib/categoryKind.ts): refunds reduce spending, savings aren't
+// spending, and transfers (card payments) and loans count in neither.
 function summarize(transactions: Txn[]) {
   let income = 0;
   let expense = 0;
+  let savings = 0;
   const expenseTotals = new Map<string, { name: string; total: number }>();
   const incomeTotals = new Map<string, { name: string; total: number }>();
   const instrumentTotals = new Map<string, { name: string; total: number }>();
 
+  const add = (m: Map<string, { name: string; total: number }>, id: string, name: string, v: number) =>
+    m.set(id, { name, total: (m.get(id)?.total ?? 0) + v });
+
   for (const t of transactions) {
     const usd = toApproxUsd(Number(t.amount), t.currency);
-    const bucket = t.category.direction === "INCOME" ? incomeTotals : expenseTotals;
-    if (t.category.direction === "INCOME") {
-      income += usd;
-    } else {
-      expense += usd;
-      // Card usage is spending only -- income isn't "used on a card" in any
-      // meaningful sense, so instrument totals only tally expense transactions.
-      const existingInst = instrumentTotals.get(t.instrument.id);
-      instrumentTotals.set(t.instrument.id, { name: t.instrument.name, total: (existingInst?.total ?? 0) + usd });
+    const kind = kindOf(t.category);
+    const flow = flowOf(kind, usd);
+    income += flow.income;
+    expense += flow.spending;
+    savings += flow.savings;
+    if (kind === "INCOME") add(incomeTotals, t.category.id, t.category.name, usd);
+    if (countsAsSpending(kind)) {
+      add(expenseTotals, t.category.id, t.category.name, flow.spending);
+      // Card usage is spending only -- income isn't "used on a card".
+      add(instrumentTotals, t.instrument.id, t.instrument.name, flow.spending);
     }
-
-    const existing = bucket.get(t.category.id);
-    bucket.set(t.category.id, { name: t.category.name, total: (existing?.total ?? 0) + usd });
   }
 
   const toSortedArray = (m: Map<string, { name: string; total: number }>) =>
     Array.from(m.entries())
       .map(([id, v]) => ({ id, name: v.name, total: Math.round(v.total * 100) / 100 }))
+      .filter((v) => v.total !== 0)
       .sort((a, b) => b.total - a.total);
 
   return {
     income: Math.round(income * 100) / 100,
     expense: Math.round(expense * 100) / 100,
     net: Math.round((income - expense) * 100) / 100,
+    savings: Math.round(savings * 100) / 100,
     expenseBreakdown: toSortedArray(expenseTotals),
     incomeBreakdown: toSortedArray(incomeTotals),
     instrumentBreakdown: toSortedArray(instrumentTotals),
