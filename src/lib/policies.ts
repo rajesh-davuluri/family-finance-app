@@ -3,6 +3,9 @@
 // used by both the API and the Policies page.
 
 import { z } from "zod";
+import { xirr } from "./xirr";
+
+export { xirr };
 
 export const POLICY_KINDS = ["LIFE", "TERM", "HEALTH", "VEHICLE", "OTHER"] as const;
 export const PolicyKind = z.enum(POLICY_KINDS);
@@ -142,3 +145,82 @@ export function last4Of(accountNumber: string): string {
 
 // Largest file kept with a policy (Vercel caps a request body at 4.5 MB).
 export const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
+
+const ymdToMs = (d: string) => Date.parse(`${d.slice(0, 10)}T00:00:00Z`);
+
+export type ScheduleInput = {
+  status: string;
+  premiumAmount: number | null;
+  premiumFrequency: string | null;
+  startDate: string | null; // first premium is paid on the start date
+  nextDueDate: string | null; // first premium not yet paid
+  premiumEndDate: string | null; // last premium (inclusive)
+  endDate: string | null; // maturity / cover end
+};
+
+export type Schedule = {
+  total: number | null; // null: open-ended (no last premium or end date)
+  paid: number;
+  left: number | null;
+  paidAmount: number;
+  leftAmount: number | null;
+  lastDue: string | null;
+  dueDates: string[]; // every premium date (empty when open-ended)
+};
+
+// How many premiums the policy takes in all, how many are paid and how many
+// are left, from its start date, frequency and last premium date -- so
+// premiums paid before the app was used count too. Premiums before the next
+// due date are taken as paid (or every premium, once premiums are done).
+// Null when there isn't enough to work it out (no start date or premium).
+export function premiumSchedule(p: ScheduleInput, today: string): Schedule | null {
+  if (!p.startDate || p.premiumAmount === null || !p.premiumFrequency) return null;
+  const amount = p.premiumAmount;
+  if (p.premiumFrequency === "SINGLE") {
+    const paid = p.startDate <= today ? 1 : 0;
+    return { total: 1, paid, left: 1 - paid, paidAmount: paid * amount, leftAmount: (1 - paid) * amount, lastDue: p.startDate, dueDates: [p.startDate] };
+  }
+  const step = MONTHS[p.premiumFrequency as PremiumFrequency];
+  if (!step) return null;
+
+  const last = p.premiumEndDate?.slice(0, 10) ?? null;
+  const end = p.endDate?.slice(0, 10) ?? null;
+  const within = (d: string) => (last ? d <= last : end ? d < end : true);
+  const paidBefore = p.status === "ACTIVE" ? (p.nextDueDate?.slice(0, 10) ?? null) : null;
+  const done = p.status !== "ACTIVE" && p.status !== "LAPSED";
+
+  const dates: string[] = [];
+  let paid = 0;
+  const open = !last && !end;
+  for (let k = 0; k < 1200; k++) {
+    const d = addMonths(p.startDate, k * step);
+    if (!within(d)) break;
+    const isPaid = done ? d <= today : paidBefore ? d < paidBefore : d <= today;
+    if (isPaid) paid++;
+    // Open-ended: stop listing once past today and unpaid.
+    if (open && !isPaid) break;
+    dates.push(d);
+  }
+  const total = open ? null : dates.length;
+  const left = total === null ? null : Math.max(0, total - paid);
+  return {
+    total,
+    paid,
+    left,
+    paidAmount: paid * amount,
+    leftAmount: left === null ? null : left * amount,
+    lastDue: open ? null : (dates[dates.length - 1] ?? null),
+    dueDates: open ? [] : dates,
+  };
+}
+
+// For a savings policy (LIC endowment): every premium against the maturity
+// payout. The yearly return is what the policy earns, comparable to an FD
+// or PPF rate. Money-back instalments paid in between aren't known here, so
+// for a money-back plan the real return is higher than shown.
+export function maturityReturn(schedule: Schedule, maturityAmount: number | null, endDate: string | null, premium: number) {
+  if (!maturityAmount || !endDate || schedule.total === null || !schedule.dueDates.length) return null;
+  const totalPremiums = schedule.total * premium;
+  const rate = xirr([...schedule.dueDates.map((d) => ({ date: d, amount: -premium })), { date: endDate.slice(0, 10), amount: maturityAmount }]);
+  return { totalPremiums, gain: maturityAmount - totalPremiums, rate };
+}

@@ -42,6 +42,7 @@ model Household {
   importBatches ImportBatch[]
   telegramLinks TelegramLink[]
   policies      InsurancePolicy[]
+  investmentAccounts InvestmentAccount[]
 }
 
 model User {
@@ -487,4 +488,85 @@ model PendingTelegramTransaction {
   createdAt    DateTime @default(now())
 
   @@index([householdId])
+}
+
+// A brokerage, demat, retirement or crypto account holding investments
+// (Zerodha, Groww, Robinhood, Fidelity 401(k)...). See src/lib/investments.ts.
+model InvestmentAccount {
+  id String @id @default(uuid())
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name      String
+  broker    String?
+  country   String  // IN | US | OTHER
+  currency  String  // what its holdings are priced in
+  kind      String  // BROKERAGE | DEMAT | RETIREMENT | MUTUAL_FUND | CRYPTO | OTHER
+  owner     String? // whose account it is
+  loginNote String? @db.NVarChar(Max) // where the login is kept -- never a password
+  notes     String? @db.NVarChar(Max)
+  archived  Boolean @default(false)
+
+  holdings Holding[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([householdId])
+}
+
+// One stock, ETF, fund or coin in an account. Quantity, cost and gains are
+// never stored: they come from its trades (first in, first out).
+model Holding {
+  id String @id @default(uuid())
+
+  accountId String
+  account   InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  symbol    String  // RELIANCE, AAPL, BTC, or an AMFI scheme code for an Indian mutual fund
+  name      String?
+  exchange  String  // NSE | BSE | US | AMFI | CRYPTO | OTHER
+  assetType String  // STOCK | ETF | MUTUAL_FUND | CRYPTO | BOND | OTHER
+  sector    String?
+  currency  String
+
+  // Latest price: fetched (LIVE) or typed in (MANUAL).
+  lastPrice   Decimal?  @db.Decimal(18, 6)
+  lastPriceAt DateTime?
+  priceSource String?
+  notes       String?   @db.NVarChar(Max)
+
+  trades InvestmentTrade[]
+
+  createdAt DateTime @default(now())
+
+  @@index([accountId])
+}
+
+// A buy, a sale or a dividend on a holding.
+model InvestmentTrade {
+  id String @id @default(uuid())
+
+  holdingId String
+  holding   Holding @relation(fields: [holdingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  type     String   // BUY | SELL | DIVIDEND
+  date     DateTime
+  quantity Decimal? @db.Decimal(18, 6) // BUY/SELL
+  price    Decimal? @db.Decimal(18, 6) // per unit, BUY/SELL
+  fees     Decimal? @db.Decimal(12, 2) // brokerage, taxes and charges
+  amount   Decimal? @db.Decimal(14, 2) // DIVIDEND: amount received
+  notes    String?  @db.NVarChar(Max)
+
+  createdAt DateTime @default(now())
+
+  @@index([holdingId])
+}
+
+// Exchange rates fetched with prices (e.g. USDINR), shared by all households.
+model MarketRate {
+  pair      String   @id
+  rate      Decimal  @db.Decimal(18, 6)
+  updatedAt DateTime @updatedAt
 }
