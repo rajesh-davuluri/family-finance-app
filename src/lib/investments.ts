@@ -402,7 +402,8 @@ function buildInsights(a: {
   // Concentration.
   if (a.rows.length > 1) {
     // Funds and ETFs already spread across many companies.
-    for (const r of a.rows.filter((x) => x.assetType !== "ETF" && x.assetType !== "MUTUAL_FUND")) {
+    // Crypto has its own observation below.
+    for (const r of a.rows.filter((x) => x.assetType !== "ETF" && x.assetType !== "MUTUAL_FUND" && x.assetType !== "CRYPTO")) {
       if (r.weight > 0.2) {
         out.push({
           level: "warn",

@@ -535,9 +535,10 @@ function HoldingRowView({
     <Fragment>
       <tr className="cursor-pointer border-b hover:bg-gray-50" onClick={onToggle}>
         <td className="p-3">
-          <div className="font-medium">{h.symbol}</div>
-          <div className="max-w-[220px] truncate text-xs text-gray-500">
-            {[h.name, ASSET_TYPE_LABELS[h.assetType], h.sector].filter(Boolean).join(" · ")}
+          {/* Mutual funds go by name; their scheme code means little. */}
+          <div className="max-w-[260px] truncate font-medium">{h.exchange === "AMFI" && h.name ? h.name : h.symbol}</div>
+          <div className="max-w-[260px] truncate text-xs text-gray-500">
+            {[h.exchange === "AMFI" && h.name ? `Scheme ${h.symbol}` : h.name, ASSET_TYPE_LABELS[h.assetType], h.sector].filter(Boolean).join(" · ")}
           </div>
         </td>
         {r?.closed ? (
