@@ -105,9 +105,14 @@ export default function InvestmentsPage() {
     setRefreshing(false);
     if (!ok) return setMessage("Couldn't refresh prices.");
     const failed = (json.failed as { symbol: string; reason: string }[]) ?? [];
+    const sources = Object.entries((json.sources as Record<string, number>) ?? {})
+      .map(([k, v]) => `${v} from ${k}`)
+      .join(", ");
     setMessage(
-      `Updated ${json.updated} price${json.updated === 1 ? "" : "s"}${json.usdInr ? ` · $1 = ₹${Number(json.usdInr).toFixed(2)}` : ""}.` +
-        (failed.length ? ` Not found: ${failed.map((f) => `${f.symbol} (${f.reason})`).join(", ")}. Check the symbol or type a price in.` : ""),
+      `Updated ${json.updated} price${json.updated === 1 ? "" : "s"}${sources ? ` (${sources})` : ""}` +
+        `${json.usdInr ? ` · $1 = ₹${Number(json.usdInr).toFixed(2)}` : " · USD/INR rate not updated"}.` +
+        (failed.length ? ` Couldn't price: ${failed.map((f) => `${f.symbol} (${f.reason})`).join("; ")}.` : "") +
+        (json.typedIn ? ` ${json.typedIn} typed-in price${json.typedIn === 1 ? "" : "s"} (e.g. the 401(k) fund) left as is.` : ""),
     );
     load();
   }
