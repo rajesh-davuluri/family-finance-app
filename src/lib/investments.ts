@@ -58,9 +58,17 @@ export type Trade = {
   price: number | null;
   fees: number | null;
   amount: number | null;
+  notes?: string | null;
+  // The date is a stand-in (e.g. imported from a holdings statement, which
+  // lists no buy dates): good enough for long/short term, not for returns.
+  approx?: boolean;
 };
 
-export type Lot = { date: string; quantity: number; unitCost: number };
+// Notes the app puts on a trade whose date is a stand-in.
+export const APPROX_DATE_NOTE = "Approximate date";
+export const isApproxNote = (notes: string | null | undefined) => !!notes && notes.startsWith(APPROX_DATE_NOTE);
+
+export type Lot = { date: string; quantity: number; unitCost: number; approx?: boolean };
 export type Realized = { date: string; quantity: number; proceeds: number; cost: number; gain: number; days: number; longTerm: boolean };
 
 const EPS = 1e-9;
@@ -97,7 +105,7 @@ export function position(trades: Trade[], ltDays: number | null) {
     const price = t.price ?? 0;
     if (qty <= 0) continue;
     if (t.type === "BUY") {
-      lots.push({ date: t.date, quantity: qty, unitCost: (qty * price + (t.fees ?? 0)) / qty });
+      lots.push({ date: t.date, quantity: qty, unitCost: (qty * price + (t.fees ?? 0)) / qty, approx: t.approx });
     } else if (t.type === "SELL") {
       let left = qty;
       const netUnit = (qty * price - (t.fees ?? 0)) / qty;
@@ -189,6 +197,7 @@ export type HoldingRow = HoldingInput & {
   oversold: number;
   realized: Realized[];
   closed: boolean; // everything sold
+  approxDates: boolean; // some buy dates are stand-ins: no yearly return
 };
 
 export type Insight = { level: "warn" | "info" | "good"; text: string };
@@ -226,7 +235,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
         if (lt !== null && held > lt) longTermGain += gain;
         else {
           shortTermGain += gain;
-          if (lt !== null) {
+          if (lt !== null && !lot.approx) {
             const days = lt + 1 - held;
             if (!nextLongTerm || days < nextLongTerm.days) nextLongTerm = { date: addDays(lot.date, lt + 1), days, quantity: lot.quantity, gain };
             else if (days === nextLongTerm.days) {
@@ -252,7 +261,8 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
     const first = h.trades.reduce<string | null>((m, t) => (!m || t.date < m ? t.date : m), null);
     // Annualising less than a year of returns exaggerates them, so XIRR only
     // once the money has been in for a year.
-    const rate = first && daysBetween(first, today) >= 365 ? xirr(flows) : null;
+    const approxDates = h.trades.some((t) => t.approx);
+    const rate = !approxDates && first && daysBetween(first, today) >= 365 ? xirr(flows) : null;
     const gain = value !== null ? value - pos.invested : null;
     return {
       ...h,
@@ -274,6 +284,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
       oversold: pos.oversold,
       realized: pos.realized,
       closed: pos.quantity <= EPS && h.trades.length > 0,
+      approxDates,
     };
   });
 
@@ -305,7 +316,8 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   );
   const firstAll = allFlows.reduce<string | null>((m, f) => (!m || f.date < m ? f.date : m), null);
   const portfolioXirr =
-    firstAll && daysBetween(firstAll, today) >= 365 && priced.length === open.length ? xirr([...allFlows, { date: today, amount: valueUsd }]) : null;
+    firstAll && daysBetween(firstAll, today) >= 365 && priced.length === open.length && !rows.some((r) => r.approxDates)
+      ? xirr([...allFlows, { date: today, amount: valueUsd }]) : null;
 
   const slice = (keyOf: (r: HoldingRow) => string, labelOf: (k: string) => string): Slice[] => {
     const m = new Map<string, number>();
@@ -424,7 +436,7 @@ function buildInsights(a: {
   if (a.rows.length >= 3 && diversified < 0.25) {
     out.push({
       level: "info",
-      text: `Only ${pct(diversified)} is in index funds, ETFs or mutual funds. A low-cost index fund (Nifty 50, S&P 500) spreads risk across many companies.`,
+      text: `Only ${pct(diversified)} is in index funds, ETFs or mutual funds. A low-cost index fund (Nifty 50, S&P 500) spreads risk across many companies. If you're a US tax resident, prefer US-listed funds: Indian mutual funds and ETFs are PFICs, taxed heavily in the US.`,
     });
   }
   if (a.byCountry.length > 1) {
@@ -448,7 +460,7 @@ function buildInsights(a: {
   if (indiaLt > 0 && room > 0) {
     out.push({
       level: "good",
-      text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting").`,
+      text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting"). That is Indian tax only: if you're a US tax resident, the US taxes these gains when sold, so harvesting just brings US tax forward.`,
     });
   }
   const usLosses = a.rows.filter((r) => r.country === "US" && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
@@ -463,7 +475,219 @@ function buildInsights(a: {
     });
   }
 
+  const approx = a.rows.filter((r) => r.approxDates);
+  if (approx.length) {
+    out.push({
+      level: "info",
+      text: `Buy dates for ${approx.length} holding${approx.length === 1 ? " are" : "s are"} approximate (from a holdings statement), so their yearly return isn't shown. Add the real buy dates, or send your broker's tradebook, for exact returns and long-term dates.`,
+    });
+  }
   const stale = a.rows.filter((r) => r.value !== null && r.priceAt && daysBetween(r.priceAt.slice(0, 10), a.today) > STALE_DAYS);
   if (stale.length) out.push({ level: "info", text: `Prices older than a week: ${stale.map((r) => r.symbol).join(", ")}. Refresh or update them.` });
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Track record: how the investing has gone over the years, per country, in
+// its own currency -- what went in and came out, the yearly return against
+// an index fund, best and worst holdings, sales made too early, IPOs, gains
+// taken by tax year, and the lessons that follow.
+
+// Long-run average yearly returns used as the "an index fund would have..."
+// yardstick. Assumptions, not actual index data for the period.
+export const BENCHMARKS: Record<string, { label: string; rate: number }> = {
+  IN: { label: "Nifty 50 index fund", rate: 0.11 },
+  US: { label: "S&P 500 index fund", rate: 0.1 },
+};
+
+const tradeCash = (t: Trade) =>
+  t.type === "BUY"
+    ? -((t.quantity ?? 0) * (t.price ?? 0) + (t.fees ?? 0))
+    : t.type === "SELL"
+      ? (t.quantity ?? 0) * (t.price ?? 0) - (t.fees ?? 0)
+      : (t.amount ?? 0);
+
+export type SoldEarly = { symbol: string; name: string | null; quantity: number; soldAt: number; priceNow: number; missed: number };
+export type Performer = { symbol: string; name: string | null; xirr: number; gain: number; closed: boolean };
+
+export type CountryRecord = {
+  country: string;
+  currency: string;
+  since: string;
+  years: number;
+  bought: number;
+  sold: number;
+  dividends: number;
+  value: number;
+  net: number; // value + sold + dividends - bought
+  xirr: number | null;
+  benchmark: { label: string; rate: number; value: number } | null; // what the same money would be worth
+  best: Performer[];
+  worst: Performer[];
+  soldEarly: SoldEarly[];
+  missedTotal: number;
+  ipo: { count: number; invested: number; value: number; gain: number; symbols: string[] } | null;
+  winners: number;
+  positions: number;
+  realizedByYear: { label: string; gain: number }[];
+  lessons: string[];
+  approx: boolean; // some dates are stand-ins
+};
+
+export function trackRecord(rows: HoldingRow[], today: string): CountryRecord[] {
+  const out: CountryRecord[] = [];
+  for (const country of ["IN", "US", "OTHER"]) {
+    const rs = rows.filter((r) => r.country === country && r.trades.length);
+    if (!rs.length) continue;
+    const currency = rs[0].currency;
+    if (rs.some((r) => r.currency !== currency)) continue; // mixed currencies: no single-currency record
+    const trades = rs.flatMap((r) => r.trades);
+    const since = trades.map((t) => t.date).sort()[0];
+    const years = daysBetween(since, today) / 365;
+    const bought = -trades.filter((t) => t.type === "BUY").reduce((x, t) => x + tradeCash(t), 0);
+    const sold = trades.filter((t) => t.type === "SELL").reduce((x, t) => x + tradeCash(t), 0);
+    const dividends = trades.filter((t) => t.type === "DIVIDEND").reduce((x, t) => x + tradeCash(t), 0);
+    const value = rs.filter((r) => !r.closed).reduce((x, r) => x + (r.value ?? r.invested), 0);
+    const approx = rs.some((r) => r.approxDates);
+    const flows = trades.map((t) => ({ date: t.date, amount: tradeCash(t) })).filter((f) => f.amount !== 0);
+    const rate = !approx && years >= 1 && value > 0 ? xirr([...flows, { date: today, amount: value }]) : null;
+
+    // Same money in and out of an index fund growing at the long-run rate.
+    const b = BENCHMARKS[country];
+    const benchmark =
+      b && !approx
+        ? { ...b, value: flows.reduce((x, f) => x - f.amount * Math.pow(1 + b.rate, daysBetween(f.date, today) / 365), 0) }
+        : null;
+
+    const perf = rs
+      .filter((r) => r.xirr !== null)
+      .map((r) => ({ symbol: r.symbol, name: r.name, xirr: r.xirr!, gain: (r.gain ?? 0) + r.realizedGain, closed: r.closed }))
+      .sort((x, y) => y.xirr - x.xirr);
+    const best = perf.filter((p) => p.xirr > 0).slice(0, 3);
+    const worst = perf
+      .filter((p) => p.xirr < 0)
+      .slice(-3)
+      .reverse();
+
+    const soldEarly: SoldEarly[] = [];
+    for (const r of rs) {
+      if (r.price === null) continue;
+      const sells = r.trades.filter((t) => t.type === "SELL" && (t.quantity ?? 0) > 0);
+      const qty = sells.reduce((x, t) => x + (t.quantity ?? 0), 0);
+      if (!qty) continue;
+      const proceeds = sells.reduce((x, t) => x + (t.quantity ?? 0) * (t.price ?? 0), 0);
+      const missed = qty * r.price - proceeds;
+      if (missed > 0 && r.price > (proceeds / qty) * 1.2) {
+        soldEarly.push({ symbol: r.symbol, name: r.name, quantity: qty, soldAt: proceeds / qty, priceNow: r.price, missed });
+      }
+    }
+    soldEarly.sort((x, y) => y.missed - x.missed);
+    const missedTotal = soldEarly.reduce((x, s) => x + s.missed, 0);
+
+    const ipoRows = rs.filter((r) => r.trades.some((t) => t.type === "BUY" && /\bIPO\b/i.test(t.notes ?? "")));
+    const ipo = ipoRows.length
+      ? {
+          count: ipoRows.length,
+          symbols: ipoRows.map((r) => r.symbol),
+          invested: ipoRows.reduce((x, r) => x + r.invested, 0),
+          value: ipoRows.reduce((x, r) => x + (r.value ?? r.invested), 0),
+          gain: ipoRows.reduce((x, r) => x + (r.gain ?? 0) + r.realizedGain, 0),
+        }
+      : null;
+
+    const winners = rs.filter((r) => (r.closed ? r.realizedGain : (r.gain ?? 0) + r.realizedGain) > 0).length;
+
+    const byYear = new Map<string, number>();
+    for (const r of rs) {
+      for (const x of r.realized) {
+        const label = country === "IN" ? `FY ${indianFyStart(x.date)}-${String(indianFyStart(x.date) + 1).slice(2)}` : x.date.slice(0, 4);
+        byYear.set(label, (byYear.get(label) ?? 0) + x.gain);
+      }
+    }
+    const realizedByYear = [...byYear.entries()].map(([label, gain]) => ({ label, gain })).sort((x, y) => x.label.localeCompare(y.label));
+
+    const lessons: string[] = [];
+    const f = (n: number) => fmtMoney(currency, n);
+    if (rate !== null && b && rate < b.rate - 0.03) {
+      lessons.push(
+        `Picking stocks has returned ${(rate * 100).toFixed(1)}% a year; a ${b.label} averages about ${Math.round(b.rate * 100)}%. Putting new money into an index fund would likely do better with less work.`,
+      );
+    } else if (rate !== null && b && rate >= b.rate) {
+      lessons.push(`At ${(rate * 100).toFixed(1)}% a year you're ahead of a ${b.label} (about ${Math.round(b.rate * 100)}%). Keep the approach that's working.`);
+    }
+    if (missedTotal > 0 && soldEarly.length) {
+      lessons.push(
+        `Sold too early: ${soldEarly
+          .slice(0, 3)
+          .map((x) => x.name || x.symbol)
+          .join(", ")} are worth ${f(missedTotal)} more today than you sold them for. Winners often keep winning; selling them to lock in a small gain cuts that short.`,
+      );
+    }
+    if (ipo && ipo.gain < 0) {
+      lessons.push(`IPOs have lost ${f(-ipo.gain)} (${ipoRows.map((r) => r.name || r.symbol).join(", ")}). New listings are priced for the seller; buying after a few quarters of results usually costs less.`);
+    }
+    const bigLosers = rs.filter((r) => !r.closed && r.gainPct !== null && r.gainPct < -0.4);
+    if (bigLosers.length) {
+      lessons.push(
+        `${bigLosers.map((r) => r.name || r.symbol).join(", ")} ${bigLosers.length === 1 ? "is" : "are"} down over 40%. Decide on each by asking "would I buy it today?", not by what you paid.`,
+      );
+    }
+    if (rs.length >= 8 && winners / rs.length < 0.6) {
+      lessons.push(`${winners} of ${rs.length} positions made money. A few big winners are carrying the rest.`);
+    }
+
+    out.push({
+      country,
+      currency,
+      since,
+      years,
+      bought,
+      sold,
+      dividends,
+      value,
+      net: value + sold + dividends - bought,
+      xirr: rate,
+      benchmark,
+      best,
+      worst,
+      soldEarly,
+      missedTotal,
+      ipo,
+      winners,
+      positions: rs.length,
+      realizedByYear,
+      lessons,
+      approx,
+    });
+  }
+  return out;
+}
+
+// Things to check when investing in India while living (and paying tax) in
+// the US. Shown when the household has Indian investments and US accounts.
+export function crossBorderChecklist(indiaInvestmentsUsd: number, indiaBankUsd: number | null): { title: string; text: string; urgent?: boolean }[] {
+  const total = indiaInvestmentsUsd + (indiaBankUsd ?? 0);
+  const fbar =
+    total > 10_000
+      ? `Your Indian accounts come to about ${fmtMoney("USD", total)}, over $10,000, so an FBAR (FinCEN 114) is due for this year: list every Indian account, filed online with your return (deadline 15 April, automatic extension to 15 October).`
+      : `Indian investments are about ${fmtMoney("USD", indiaInvestmentsUsd)}${indiaBankUsd !== null ? ` and Indian bank balances about ${fmtMoney("USD", indiaBankUsd)}` : ""}. If all your Indian accounts together topped $10,000 at any point in the year (highest balances, not year-end), an FBAR is due.`;
+  return [
+    {
+      title: "Demat account type",
+      text: "Once you're a non-resident (NRI), Indian rules (FEMA) require a resident demat/trading account to be converted to an NRO one. Ask your broker; most handle it with a form and KYC.",
+    },
+    { title: "FBAR", text: fbar, urgent: total > 10_000 },
+    {
+      title: "US tax on Indian gains and dividends",
+      text: "As a US tax resident, Indian gains and dividends go on your US return even when India doesn't tax them; Indian tax paid is claimed back as a foreign tax credit (Form 1116). Your US cost is the dollar amount on the day you bought.",
+    },
+    {
+      title: "Funds (PFIC)",
+      text: "Indian mutual funds and ETFs are PFICs for US tax: heavy tax and a Form 8621 each. Hold Indian shares directly, or get India exposure through a US-listed fund (e.g. INDA).",
+    },
+    {
+      title: "Form 8938 (FATCA)",
+      text: "If foreign financial assets exceed $50,000 at year-end or $75,000 at any time (double for married filing jointly), Form 8938 goes with your return too.",
+    },
+  ];
 }

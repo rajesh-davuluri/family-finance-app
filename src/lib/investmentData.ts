@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { Currency } from "@/lib/enums";
-import { AccountKind, AssetType, Country, Exchange, TradeType, type Fx, type HoldingInput } from "@/lib/investments";
+import { AccountKind, AssetType, Country, Exchange, TradeType, isApproxNote, type Fx, type HoldingInput } from "@/lib/investments";
 import { getDefaultRate } from "@/lib/fx";
 
 const text = (max = 200) => z.string().trim().max(max).nullable().optional();
@@ -81,7 +81,8 @@ export async function currentFx(): Promise<Fx & { updatedAt: string | null; live
 }
 
 export const accountInclude = {
-  holdings: { include: { trades: { orderBy: { date: "asc" } } }, orderBy: { symbol: "asc" } },
+  // Date, then time of day (same-day buys must match sales in the order they were made).
+  holdings: { include: { trades: { orderBy: [{ date: "asc" }, { createdAt: "asc" }] } }, orderBy: { symbol: "asc" } },
 } satisfies Prisma.InvestmentAccountInclude;
 
 type AccountRow = Prisma.InvestmentAccountGetPayload<{ include: typeof accountInclude }>;
@@ -118,7 +119,7 @@ export function holdingInputs(accounts: ReturnType<typeof accountJson>[]): Holdi
         price: h.lastPrice,
         priceAt: h.lastPriceAt ? h.lastPriceAt.toISOString() : null,
         priceSource: h.priceSource,
-        trades: h.trades,
+        trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
       })),
     );
 }

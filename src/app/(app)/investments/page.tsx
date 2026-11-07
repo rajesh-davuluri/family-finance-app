@@ -13,7 +13,12 @@ import {
   EXCHANGE_LABELS,
   INDIA_LTCG_EXEMPTION,
   analyze,
+  crossBorderChecklist,
   fmtMoney,
+  toUsd,
+  trackRecord,
+  type CountryRecord,
+  isApproxNote,
   type HoldingInput,
   type HoldingRow,
   type Slice,
@@ -96,6 +101,9 @@ async function send(url: string, method: string, body?: unknown) {
 export default function InvestmentsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [fx, setFx] = useState<Fx>({ USDINR: 94.3, updatedAt: null, live: false });
+  // Bank accounts: whether the household has US accounts, and Indian bank
+  // balances for the FBAR estimate.
+  const [banks, setBanks] = useState<{ currency: string; type: string; archived: boolean; currentBalance: number | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -105,7 +113,8 @@ export default function InvestmentsPage() {
   const today = getTodayLocal();
 
   async function load() {
-    const res = await fetch("/api/investments");
+    const [res, inst] = await Promise.all([fetch("/api/investments"), fetch("/api/instruments")]);
+    if (inst.ok) setBanks(await inst.json());
     if (res.ok) {
       const body = await res.json();
       setAccounts(body.accounts);
@@ -151,13 +160,21 @@ export default function InvestmentsPage() {
             price: h.lastPrice,
             priceAt: h.lastPriceAt,
             priceSource: h.priceSource,
-            trades: h.trades,
+            trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
           })),
         ),
     [accounts],
   );
   const a = useMemo(() => analyze(inputs, fx, today), [inputs, fx, today]);
   const rowOf = useMemo(() => new Map(a.rows.map((r) => [r.id, r])), [a]);
+  const records = useMemo(() => trackRecord(a.rows, today), [a, today]);
+  const india = a.rows.filter((r) => r.country === "IN" && !r.closed);
+  const usAccounts = banks.some((b) => !b.archived && b.currency === "USD") || a.rows.some((r) => r.country === "US");
+  const inrBanks = banks.filter((b) => !b.archived && b.currency === "INR" && b.type !== "CREDIT_CARD");
+  const indiaBankUsd = inrBanks.some((b) => b.currentBalance !== null)
+    ? inrBanks.reduce((x, b) => x + toUsd(Math.max(0, b.currentBalance ?? 0), "INR", fx), 0)
+    : null;
+  const checklist = india.length && usAccounts ? crossBorderChecklist(india.reduce((x, r) => x + r.valueUsd, 0), indiaBankUsd) : [];
   const lastRefresh = accounts
     .flatMap((x) => x.holdings)
     .filter((h) => h.priceSource === "LIVE" && h.lastPriceAt)
@@ -288,6 +305,12 @@ export default function InvestmentsPage() {
           </div>
 
           <TaxPanel a={a} />
+
+          {records.map((r) => (
+            <TrackRecord key={r.country} r={r} />
+          ))}
+
+          {checklist.length > 0 && <Checklist items={checklist} />}
         </>
       )}
 
@@ -365,6 +388,150 @@ function Bars({ title, slices }: { title: string; slices: Slice[] }) {
   );
 }
 
+function TrackRecord({ r }: { r: CountryRecord }) {
+  const c = r.currency;
+  const m = (n: number) => fmtMoney(c, n);
+  const since = new Date(`${r.since}T00:00:00`).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  const name = (p: { name: string | null; symbol: string }) => p.name || p.symbol;
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <h2 className="text-sm font-semibold text-gray-700">
+        Your track record · {COUNTRY_LABELS[r.country]} since {since}
+        <span className="ml-1 font-normal text-gray-400">({r.years.toFixed(1)} years)</span>
+      </h2>
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+        {(
+          [
+            ["Put in", m(r.bought), ""],
+            ["Taken out", m(r.sold + r.dividends), ""],
+            ["Worth now", m(r.value), ""],
+            ["Net result", m(r.net), tone(r.net)],
+            ["Return per year", r.xirr !== null ? pctText(r.xirr) : "—", tone(r.xirr)],
+          ] as const
+        ).map(([k, v, cls]) => (
+          <div key={k}>
+            <dt className="text-xs uppercase tracking-wide text-gray-500">{k}</dt>
+            <dd className={`font-display mt-0.5 text-base font-semibold ${cls || "text-gray-800"}`}>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {r.benchmark && (
+        <p className="mt-3 rounded-md bg-gray-50 p-3 text-sm text-gray-700">
+          The same money, put in and taken out on the same dates, in a {r.benchmark.label} (about {Math.round(r.benchmark.rate * 100)}% a year over
+          the long run) would be worth about <strong>{m(r.benchmark.value)}</strong> today, against your {m(r.value)}
+          {r.benchmark.value > r.value ? ` (${m(r.benchmark.value - r.value)} more).` : "."}
+        </p>
+      )}
+      {r.approx && <p className="mt-2 text-xs text-gray-400">Some buy dates are approximate, so the yearly return and the comparison aren&apos;t shown.</p>}
+
+      <div className="mt-4 grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
+        {r.best.length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Best (per year)</h3>
+            {r.best.map((p) => (
+              <div key={p.symbol} className="flex justify-between gap-2 py-0.5">
+                <span>
+                  {name(p)}
+                  {p.closed && <span className="text-xs text-gray-400"> · sold</span>}
+                </span>
+                <span className="tabular-nums text-income-600">
+                  {pctText(p.xirr)} <span className="text-xs text-gray-500">({m(p.gain)})</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {r.worst.length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Worst (per year)</h3>
+            {r.worst.map((p) => (
+              <div key={p.symbol} className="flex justify-between gap-2 py-0.5">
+                <span>
+                  {name(p)}
+                  {p.closed && <span className="text-xs text-gray-400"> · sold</span>}
+                </span>
+                <span className="tabular-nums text-expense-600">
+                  {pctText(p.xirr)} <span className="text-xs text-gray-500">({m(p.gain)})</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {r.soldEarly.length > 0 && (
+          <div>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Sold too early</h3>
+            {r.soldEarly.slice(0, 4).map((x) => (
+              <div key={x.symbol} className="flex justify-between gap-2 py-0.5">
+                <span>
+                  {name(x)}: {qtyText(x.quantity)} sold at {fmtMoney(c, x.soldAt, 2)}, now {fmtMoney(c, x.priceNow, 2)}
+                </span>
+                <span className="tabular-nums text-gray-600">+{m(x.missed)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {(r.ipo || r.realizedByYear.length > 0) && (
+          <div className="space-y-3">
+            {r.ipo && (
+              <div>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">IPOs</h3>
+                <p>
+                  {r.ipo.count} IPO{r.ipo.count === 1 ? "" : "s"}: put in {m(r.ipo.invested)}, worth {m(r.ipo.value)},{" "}
+                  <span className={tone(r.ipo.gain)}>{m(r.ipo.gain)}</span>
+                </p>
+              </div>
+            )}
+            {r.realizedByYear.length > 0 && (
+              <div>
+                <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Gains taken (sold)</h3>
+                {r.realizedByYear.map((y) => (
+                  <div key={y.label} className="flex justify-between gap-2 py-0.5">
+                    <span>{y.label}</span>
+                    <span className={`tabular-nums ${tone(y.gain)}`}>{m(y.gain)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {r.lessons.length > 0 && (
+        <div className="mt-4 border-t pt-3">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Lessons</h3>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">
+            {r.lessons.map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="mt-3 text-xs text-gray-400">
+        Worked out from the buys and sales recorded here. Index returns are long-run averages, not the exact index for these dates.
+      </p>
+    </div>
+  );
+}
+
+function Checklist({ items }: { items: { title: string; text: string; urgent?: boolean }[] }) {
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <h2 className="text-sm font-semibold text-gray-700">Living in the US, investing in India: checklist</h2>
+      <p className="mt-0.5 text-xs text-gray-500">If you&apos;re a US tax resident. Worth confirming once with a CPA who handles US–India tax.</p>
+      <ul className="mt-3 space-y-2 text-sm">
+        {items.map((x) => (
+          <li key={x.title} className="flex gap-2">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${x.urgent ? "bg-amber-500" : "bg-brand-400"}`} />
+            <span>
+              <strong className="font-medium text-gray-800">{x.title}.</strong> <span className="text-gray-700">{x.text}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
   const india = a.rows.filter((r) => r.country === "IN" && !r.closed && r.value !== null);
   const us = a.rows.filter((r) => r.country === "US" && !r.closed && r.value !== null);
@@ -375,7 +542,7 @@ function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
     <div className="rounded-lg border bg-white p-4">
       <h2 className="mb-2 text-sm font-semibold text-gray-700">Tax view</h2>
       <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-        {(india.length > 0 || a.realizedIndia.lt || a.realizedIndia.st) && (
+        {(india.length > 0 || a.realizedIndia.lt !== 0 || a.realizedIndia.st !== 0) && (
           <div>
             <p className="font-medium text-gray-700">India · {a.realizedIndia.label}</p>
             <dl className="mt-1 space-y-0.5 text-gray-600">
@@ -391,7 +558,7 @@ function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
             </dl>
           </div>
         )}
-        {(us.length > 0 || a.realizedUs.lt || a.realizedUs.st) && (
+        {(us.length > 0 || a.realizedUs.lt !== 0 || a.realizedUs.st !== 0) && (
           <div>
             <p className="font-medium text-gray-700">USA · {a.realizedUs.label}</p>
             <dl className="mt-1 space-y-0.5 text-gray-600">
@@ -526,10 +693,10 @@ function HoldingRowView({
   const c = h.currency;
   const term = (() => {
     if (!r || r.closed || r.value === null) return null;
-    if (r.nextLongTerm) {
-      return r.longTermGain && Math.abs(r.longTermGain) > 0.005 ? `Mixed · rest LT in ${r.nextLongTerm.days}d` : `ST · LT in ${r.nextLongTerm.days}d`;
-    }
-    return r.shortTermGain && Math.abs(r.shortTermGain) > 0.005 ? "Short-term" : "Long-term";
+    const lt = r.longTermGain !== null && Math.abs(r.longTermGain) > 0.005;
+    const st = r.shortTermGain !== null && Math.abs(r.shortTermGain) > 0.005;
+    const label = lt && st ? "Mixed" : st ? "Short-term" : "Long-term";
+    return r.nextLongTerm ? `${lt ? "Mixed" : "ST"} · LT in ${r.nextLongTerm.days}d` : label;
   })();
   return (
     <Fragment>
@@ -572,7 +739,7 @@ function HoldingRowView({
             </td>
             <td className="p-3 text-xs text-gray-600">{term ?? "—"}</td>
             <td className="p-3 text-right tabular-nums text-gray-600">{r ? `${Math.round(r.weight * 100)}%` : "—"}</td>
-            <td className={`p-3 text-right tabular-nums ${tone(r?.xirr ?? null)}`}>{r?.xirr != null ? pctText(r.xirr) : "—"}</td>
+            <td className={`p-3 text-right tabular-nums ${tone(r?.xirr ?? null)}`}>{r?.xirr != null ? pctText(r.xirr) : r?.approxDates ? <span className="text-xs text-gray-400" title="Buy dates are approximate">dates approx.</span> : "—"}</td>
           </>
         )}
       </tr>
