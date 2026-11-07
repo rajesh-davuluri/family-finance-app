@@ -14,6 +14,7 @@ import {
   INDIA_LTCG_EXEMPTION,
   analyze,
   fmtMoney,
+  isApproxNote,
   type HoldingInput,
   type HoldingRow,
   type Slice,
@@ -151,7 +152,7 @@ export default function InvestmentsPage() {
             price: h.lastPrice,
             priceAt: h.lastPriceAt,
             priceSource: h.priceSource,
-            trades: h.trades,
+            trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
           })),
         ),
     [accounts],
@@ -375,7 +376,7 @@ function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
     <div className="rounded-lg border bg-white p-4">
       <h2 className="mb-2 text-sm font-semibold text-gray-700">Tax view</h2>
       <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-        {(india.length > 0 || a.realizedIndia.lt || a.realizedIndia.st) && (
+        {(india.length > 0 || a.realizedIndia.lt !== 0 || a.realizedIndia.st !== 0) && (
           <div>
             <p className="font-medium text-gray-700">India · {a.realizedIndia.label}</p>
             <dl className="mt-1 space-y-0.5 text-gray-600">
@@ -391,7 +392,7 @@ function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
             </dl>
           </div>
         )}
-        {(us.length > 0 || a.realizedUs.lt || a.realizedUs.st) && (
+        {(us.length > 0 || a.realizedUs.lt !== 0 || a.realizedUs.st !== 0) && (
           <div>
             <p className="font-medium text-gray-700">USA · {a.realizedUs.label}</p>
             <dl className="mt-1 space-y-0.5 text-gray-600">
@@ -526,10 +527,10 @@ function HoldingRowView({
   const c = h.currency;
   const term = (() => {
     if (!r || r.closed || r.value === null) return null;
-    if (r.nextLongTerm) {
-      return r.longTermGain && Math.abs(r.longTermGain) > 0.005 ? `Mixed · rest LT in ${r.nextLongTerm.days}d` : `ST · LT in ${r.nextLongTerm.days}d`;
-    }
-    return r.shortTermGain && Math.abs(r.shortTermGain) > 0.005 ? "Short-term" : "Long-term";
+    const lt = r.longTermGain !== null && Math.abs(r.longTermGain) > 0.005;
+    const st = r.shortTermGain !== null && Math.abs(r.shortTermGain) > 0.005;
+    const label = lt && st ? "Mixed" : st ? "Short-term" : "Long-term";
+    return r.nextLongTerm ? `${lt ? "Mixed" : "ST"} · LT in ${r.nextLongTerm.days}d` : label;
   })();
   return (
     <Fragment>
@@ -572,7 +573,7 @@ function HoldingRowView({
             </td>
             <td className="p-3 text-xs text-gray-600">{term ?? "—"}</td>
             <td className="p-3 text-right tabular-nums text-gray-600">{r ? `${Math.round(r.weight * 100)}%` : "—"}</td>
-            <td className={`p-3 text-right tabular-nums ${tone(r?.xirr ?? null)}`}>{r?.xirr != null ? pctText(r.xirr) : "—"}</td>
+            <td className={`p-3 text-right tabular-nums ${tone(r?.xirr ?? null)}`}>{r?.xirr != null ? pctText(r.xirr) : r?.approxDates ? <span className="text-xs text-gray-400" title="Buy dates are approximate">dates approx.</span> : "—"}</td>
           </>
         )}
       </tr>

@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { Currency } from "@/lib/enums";
-import { AccountKind, AssetType, Country, Exchange, TradeType, type Fx, type HoldingInput } from "@/lib/investments";
+import { AccountKind, AssetType, Country, Exchange, TradeType, isApproxNote, type Fx, type HoldingInput } from "@/lib/investments";
 import { getDefaultRate } from "@/lib/fx";
 
 const text = (max = 200) => z.string().trim().max(max).nullable().optional();
@@ -118,7 +118,7 @@ export function holdingInputs(accounts: ReturnType<typeof accountJson>[]): Holdi
         price: h.lastPrice,
         priceAt: h.lastPriceAt ? h.lastPriceAt.toISOString() : null,
         priceSource: h.priceSource,
-        trades: h.trades,
+        trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
       })),
     );
 }

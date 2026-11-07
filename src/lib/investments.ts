@@ -58,9 +58,16 @@ export type Trade = {
   price: number | null;
   fees: number | null;
   amount: number | null;
+  // The date is a stand-in (e.g. imported from a holdings statement, which
+  // lists no buy dates): good enough for long/short term, not for returns.
+  approx?: boolean;
 };
 
-export type Lot = { date: string; quantity: number; unitCost: number };
+// Notes the app puts on a trade whose date is a stand-in.
+export const APPROX_DATE_NOTE = "Approximate date";
+export const isApproxNote = (notes: string | null | undefined) => !!notes && notes.startsWith(APPROX_DATE_NOTE);
+
+export type Lot = { date: string; quantity: number; unitCost: number; approx?: boolean };
 export type Realized = { date: string; quantity: number; proceeds: number; cost: number; gain: number; days: number; longTerm: boolean };
 
 const EPS = 1e-9;
@@ -97,7 +104,7 @@ export function position(trades: Trade[], ltDays: number | null) {
     const price = t.price ?? 0;
     if (qty <= 0) continue;
     if (t.type === "BUY") {
-      lots.push({ date: t.date, quantity: qty, unitCost: (qty * price + (t.fees ?? 0)) / qty });
+      lots.push({ date: t.date, quantity: qty, unitCost: (qty * price + (t.fees ?? 0)) / qty, approx: t.approx });
     } else if (t.type === "SELL") {
       let left = qty;
       const netUnit = (qty * price - (t.fees ?? 0)) / qty;
@@ -189,6 +196,7 @@ export type HoldingRow = HoldingInput & {
   oversold: number;
   realized: Realized[];
   closed: boolean; // everything sold
+  approxDates: boolean; // some buy dates are stand-ins: no yearly return
 };
 
 export type Insight = { level: "warn" | "info" | "good"; text: string };
@@ -226,7 +234,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
         if (lt !== null && held > lt) longTermGain += gain;
         else {
           shortTermGain += gain;
-          if (lt !== null) {
+          if (lt !== null && !lot.approx) {
             const days = lt + 1 - held;
             if (!nextLongTerm || days < nextLongTerm.days) nextLongTerm = { date: addDays(lot.date, lt + 1), days, quantity: lot.quantity, gain };
             else if (days === nextLongTerm.days) {
@@ -252,7 +260,8 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
     const first = h.trades.reduce<string | null>((m, t) => (!m || t.date < m ? t.date : m), null);
     // Annualising less than a year of returns exaggerates them, so XIRR only
     // once the money has been in for a year.
-    const rate = first && daysBetween(first, today) >= 365 ? xirr(flows) : null;
+    const approxDates = h.trades.some((t) => t.approx);
+    const rate = !approxDates && first && daysBetween(first, today) >= 365 ? xirr(flows) : null;
     const gain = value !== null ? value - pos.invested : null;
     return {
       ...h,
@@ -274,6 +283,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
       oversold: pos.oversold,
       realized: pos.realized,
       closed: pos.quantity <= EPS && h.trades.length > 0,
+      approxDates,
     };
   });
 
@@ -305,7 +315,8 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   );
   const firstAll = allFlows.reduce<string | null>((m, f) => (!m || f.date < m ? f.date : m), null);
   const portfolioXirr =
-    firstAll && daysBetween(firstAll, today) >= 365 && priced.length === open.length ? xirr([...allFlows, { date: today, amount: valueUsd }]) : null;
+    firstAll && daysBetween(firstAll, today) >= 365 && priced.length === open.length && !rows.some((r) => r.approxDates)
+      ? xirr([...allFlows, { date: today, amount: valueUsd }]) : null;
 
   const slice = (keyOf: (r: HoldingRow) => string, labelOf: (k: string) => string): Slice[] => {
     const m = new Map<string, number>();
@@ -424,7 +435,7 @@ function buildInsights(a: {
   if (a.rows.length >= 3 && diversified < 0.25) {
     out.push({
       level: "info",
-      text: `Only ${pct(diversified)} is in index funds, ETFs or mutual funds. A low-cost index fund (Nifty 50, S&P 500) spreads risk across many companies.`,
+      text: `Only ${pct(diversified)} is in index funds, ETFs or mutual funds. A low-cost index fund (Nifty 50, S&P 500) spreads risk across many companies. If you're a US tax resident, prefer US-listed funds: Indian mutual funds and ETFs are PFICs, taxed heavily in the US.`,
     });
   }
   if (a.byCountry.length > 1) {
@@ -448,7 +459,7 @@ function buildInsights(a: {
   if (indiaLt > 0 && room > 0) {
     out.push({
       level: "good",
-      text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting").`,
+      text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting"). That is Indian tax only: if you're a US tax resident, the US taxes these gains when sold, so harvesting just brings US tax forward.`,
     });
   }
   const usLosses = a.rows.filter((r) => r.country === "US" && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
@@ -463,6 +474,13 @@ function buildInsights(a: {
     });
   }
 
+  const approx = a.rows.filter((r) => r.approxDates);
+  if (approx.length) {
+    out.push({
+      level: "info",
+      text: `Buy dates for ${approx.length} holding${approx.length === 1 ? " are" : "s are"} approximate (from a holdings statement), so their yearly return isn't shown. Add the real buy dates, or send your broker's tradebook, for exact returns and long-term dates.`,
+    });
+  }
   const stale = a.rows.filter((r) => r.value !== null && r.priceAt && daysBetween(r.priceAt.slice(0, 10), a.today) > STALE_DAYS);
   if (stale.length) out.push({ level: "info", text: `Prices older than a week: ${stale.map((r) => r.symbol).join(", ")}. Refresh or update them.` });
   return out;
