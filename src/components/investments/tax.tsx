@@ -49,8 +49,8 @@ export function TaxTab({ a, checklist }: { a: ReturnType<typeof analyze>; checkl
 }
 
 function TaxPanel({ a }: { a: ReturnType<typeof analyze> }) {
-  const india = a.rows.filter((r) => r.country === "IN" && !r.closed && r.value !== null);
-  const us = a.rows.filter((r) => r.country === "US" && !r.closed && r.value !== null);
+  const india = a.rows.filter((r) => r.country === "IN" && !r.closed && r.value !== null && !r.taxDeferred);
+  const us = a.rows.filter((r) => r.country === "US" && !r.closed && r.value !== null && !r.taxDeferred);
   const sum = (rs: HoldingRow[], k: "longTermGain" | "shortTermGain") => rs.reduce((s, r) => s + (r[k] ?? 0), 0);
   const used = Math.max(0, a.realizedIndia.lt);
   if (!india.length && !us.length && !a.realizedIndia.lt && !a.realizedUs.lt) return null;

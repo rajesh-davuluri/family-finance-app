@@ -174,6 +174,9 @@ export type HoldingInput = {
   priceAt: string | null; // ISO
   priceSource: string | null;
   trades: Trade[];
+  // In a retirement account (401(k), IRA, NPS): gains aren't taxed until
+  // withdrawal, so no long/short-term split or tax notes.
+  taxDeferred?: boolean;
 };
 
 export type NextLongTerm = { date: string; days: number; quantity: number; gain: number };
@@ -220,13 +223,13 @@ const STALE_DAYS = 7;
 
 export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   const rows: HoldingRow[] = holdings.map((h) => {
-    const lt = longTermDays(h.country, h.assetType);
+    const lt = h.taxDeferred ? null : longTermDays(h.country, h.assetType);
     const pos = position(h.trades, lt);
     const value = h.price !== null ? pos.quantity * h.price : null;
     let longTermGain: number | null = null;
     let shortTermGain: number | null = null;
     let nextLongTerm: NextLongTerm | null = null;
-    if (h.price !== null) {
+    if (h.price !== null && !h.taxDeferred) {
       longTermGain = 0;
       shortTermGain = 0;
       for (const lot of pos.lots) {
@@ -350,6 +353,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   const realizedIndia = { lt: 0, st: 0, label: `FY ${fy}-${String(fy + 1).slice(2)}` };
   const realizedUs = { lt: 0, st: 0, label: year };
   for (const r of rows) {
+    if (r.taxDeferred) continue;
     for (const x of r.realized) {
       if (r.country === "IN" && indianFyStart(x.date) === fy) {
         if (x.longTerm) realizedIndia.lt += x.gain;
@@ -426,7 +430,8 @@ function buildInsights(a: {
       }
     }
   }
-  const sector = a.bySector.find((s) => s.key !== "Not set" && s.weight > 0.35);
+  // Funds already spread across sectors.
+  const sector = a.bySector.find((s) => s.key !== "Not set" && s.key !== "Index / Diversified" && s.weight > 0.35);
   if (sector) out.push({ level: "warn", text: `${pct(sector.weight)} is in ${sector.label}. A downturn in that one sector would hit a large part of the portfolio.` });
   const crypto = a.byAssetType.find((s) => s.key === "CRYPTO");
   if (crypto && crypto.weight > 0.1) {
@@ -463,7 +468,7 @@ function buildInsights(a: {
       text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting"). That is Indian tax only: if you're a US tax resident, the US taxes these gains when sold, so harvesting just brings US tax forward.`,
     });
   }
-  const usLosses = a.rows.filter((r) => r.country === "US" && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
+  const usLosses = a.rows.filter((r) => r.country === "US" && !r.taxDeferred && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
   if (usLosses.length) {
     const total = usLosses.reduce((s, r) => s + r.gain!, 0);
     out.push({
@@ -598,7 +603,7 @@ export function trackRecord(rows: HoldingRow[], today: string): CountryRecord[] 
     const winners = rs.filter((r) => (r.closed ? r.realizedGain : (r.gain ?? 0) + r.realizedGain) > 0).length;
 
     const byYear = new Map<string, number>();
-    for (const r of rs) {
+    for (const r of rs.filter((x) => !x.taxDeferred)) {
       for (const x of r.realized) {
         const label = country === "IN" ? `FY ${indianFyStart(x.date)}-${String(indianFyStart(x.date) + 1).slice(2)}` : x.date.slice(0, 4);
         byYear.set(label, (byYear.get(label) ?? 0) + x.gain);
@@ -722,12 +727,13 @@ export function healthCheck(a: ReturnType<typeof analyze>, today: string): Healt
       note: `${top.name || top.symbol}. Under 10% keeps one company's bad news small.`,
     });
   }
-  const top3 = [...open].sort((x, y) => y.weight - x.weight).slice(0, 3);
-  if (open.length > 3) {
+  // Funds already hold hundreds of companies: concentration is about single stocks.
+  const top3 = singles.slice(0, 3);
+  if (singles.length > 3) {
     const w = top3.reduce((s, r) => s + r.weight, 0);
     out.push({
       key: "top3",
-      label: "Top 3 holdings",
+      label: "Top 3 stocks",
       value: pct(w),
       status: rate(w, 0.4, 0.6),
       note: top3.map((r) => r.name || r.symbol).join(", "),

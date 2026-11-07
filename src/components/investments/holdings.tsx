@@ -20,6 +20,7 @@ const SORTS: [SortKey, string][] = [
 
 function termOf(r: HoldingRow) {
   if (r.closed || r.value === null) return null;
+  if (r.taxDeferred) return "Tax-deferred";
   const lt = r.longTermGain !== null && Math.abs(r.longTermGain) > 0.005;
   const st = r.shortTermGain !== null && Math.abs(r.shortTermGain) > 0.005;
   if (r.nextLongTerm) return `${lt ? "Mixed" : "Short"} · long in ${r.nextLongTerm.days}d`;

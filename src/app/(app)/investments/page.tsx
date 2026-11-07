@@ -132,6 +132,7 @@ export default function InvestmentsPage() {
             priceAt: h.lastPriceAt,
             priceSource: h.priceSource,
             trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
+            taxDeferred: a.kind === "RETIREMENT",
           })),
         ),
     [accounts],
