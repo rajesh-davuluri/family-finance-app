@@ -57,6 +57,13 @@ export function targetForRule(
     case "SALARY":
       if (!moneyIn) break;
       return category(byName(/salary|payroll|paycheck/i), proposed("Salary", "INCOME", "INCOME", "INCOME"));
+    case "REMITTANCE":
+      if (moneyIn) break;
+      // A transfer-type category: the money is still yours, in India.
+      return category(
+        cats.find((c) => c.effectiveKind === "TRANSFER" && /india|abroad|remit|international|overseas/i.test(c.name)),
+        proposed("Transfer to India", "EXPENSE", "TRANSFER", "TRANSFERS")
+      );
     case "INVESTMENT":
       if (moneyIn) break;
       return category(byKind("SAVINGS", /invest/i), proposed("Investment", "EXPENSE", "SAVINGS", "SAVINGS"));
