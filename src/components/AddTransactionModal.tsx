@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import { money } from "@/lib/money";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -40,10 +41,14 @@ export default function AddTransactionModal({
   onClose,
   onSuccess,
   editingTransaction,
+  onDelete,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  // When editing, offers a Delete button (on a phone the transaction list
+  // has no row buttons: tapping a transaction opens it here).
+  onDelete?: (id: string) => void;
   // When provided, the modal edits this transaction (PATCH) instead of
   // creating a new one (POST). Everything else about the form is identical.
   editingTransaction?: EditableTransaction | null;
@@ -90,10 +95,12 @@ export default function AddTransactionModal({
           instrumentId: editingTransaction.instrumentId,
         });
       } else {
+        const first = insts.find((i: Instrument) => !i.archived);
         setForm((f) => ({
           ...f,
           categoryId: cats[0]?.id || "",
-          instrumentId: insts.find((i: Instrument) => !i.archived)?.id || "",
+          instrumentId: first?.id || "",
+          currency: first?.currency || f.currency,
         }));
       }
       setLoading(false);
@@ -141,11 +148,16 @@ export default function AddTransactionModal({
   const noSetupYet = !loading && (categories.length === 0 || instruments.length === 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
+    // A sheet from the bottom on a phone (within thumb reach), a centred dialog on wider screens.
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div
+        className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-lg sm:rounded-lg sm:p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 sm:hidden" aria-hidden />
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{isEditing ? "Edit Transaction" : "Add Transaction"}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+          <button onClick={onClose} className="-mr-2 flex h-10 w-10 items-center justify-center text-gray-400 hover:text-gray-600" aria-label="Close">
             ✕
           </button>
         </div>
@@ -163,13 +175,16 @@ export default function AddTransactionModal({
             <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.01"
                 min="0.01"
                 required
+                autoFocus={!isEditing}
                 placeholder="Amount"
+                aria-label="Amount"
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                className="rounded-md border px-3 py-2 text-sm"
+                className="rounded-md border px-3 py-3 text-2xl font-semibold tabular-nums sm:py-2 sm:text-sm sm:font-normal"
               />
               <select
                 value={form.currency}
@@ -195,7 +210,11 @@ export default function AddTransactionModal({
               </select>
               <select
                 value={form.instrumentId}
-                onChange={(e) => setForm({ ...form, instrumentId: e.target.value })}
+                onChange={(e) => {
+                  // A rupee account means rupees: follow the account's currency.
+                  const inst = instruments.find((i) => i.id === e.target.value);
+                  setForm({ ...form, instrumentId: e.target.value, currency: inst?.currency ?? form.currency });
+                }}
                 className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
               >
                 {instruments
@@ -229,7 +248,7 @@ export default function AddTransactionModal({
                 >
                   <p className="font-medium">This looks like it&rsquo;s already recorded:</p>
                   <p className="mt-1">
-                    {formatDate(duplicate.date)} · {duplicate.currency} {duplicate.amount.toFixed(2)}
+                    {formatDate(duplicate.date)} · {money(duplicate.amount, duplicate.currency)}
                     {duplicate.notes ? ` · “${duplicate.notes}”` : ""} · {duplicate.categoryName} ·{" "}
                     {duplicate.instrumentName}
                     {SOURCE_WORDS[duplicate.source] ? ` (${SOURCE_WORDS[duplicate.source]})` : ""}
@@ -253,18 +272,27 @@ export default function AddTransactionModal({
                   </div>
                 </div>
               )}
-              <div className="flex justify-end gap-2 sm:col-span-2">
+              <div className="flex items-center justify-end gap-2 sm:col-span-2">
+                {isEditing && onDelete && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(editingTransaction!.id)}
+                    className="mr-auto rounded-md px-2 py-2.5 text-sm text-red-600 hover:underline sm:py-2"
+                  >
+                    Delete
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-md border px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                  className="rounded-md border px-4 py-2.5 text-sm text-gray-600 hover:bg-gray-50 sm:py-2"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting || noSetupYet}
-                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  className="flex-1 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:flex-none sm:py-2"
                 >
                   {submitting ? "Saving..." : isEditing ? "Save Changes" : "Add Transaction"}
                 </button>

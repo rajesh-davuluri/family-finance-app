@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import Providers from "@/components/Providers";
@@ -42,6 +42,18 @@ const plexMono = localFont({
 export const metadata: Metadata = {
   title: "Family Finance",
   description: "A shared household finance tracker",
+  // Added to an iPhone's home screen, it opens full-screen with its own icon.
+  appleWebApp: { capable: true, title: "Finance", statusBarStyle: "black-translucent" },
+  formatDetection: { telephone: false },
+};
+
+// viewport-fit=cover lets the layout reach under the notch and home
+// indicator; the navbar and tab bar pad themselves with the safe-area insets.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1C2B3A",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
