@@ -120,6 +120,7 @@ export function holdingInputs(accounts: ReturnType<typeof accountJson>[]): Holdi
         priceAt: h.lastPriceAt ? h.lastPriceAt.toISOString() : null,
         priceSource: h.priceSource,
         trades: h.trades.map((t) => ({ ...t, approx: isApproxNote(t.notes) })),
+        taxDeferred: a.kind === "RETIREMENT",
       })),
     );
 }

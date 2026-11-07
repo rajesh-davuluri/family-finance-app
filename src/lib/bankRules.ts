@@ -8,7 +8,8 @@
 //   Mobile Banking payment to CRD 5751        -> card payment (card ending 5751)
 //   BN ASSOCIATES IN DES:PAYROLL ...          -> salary
 //   Zelle payment from <your own name>        -> transfer between your accounts
-//   CYBRID-CROBO.MON / COINBASE / ...         -> investing
+//   CYBRID-CROBO.MON / REMITLY / WISE ...     -> money sent to India (remittance)
+//   COINBASE / FIDELITY / ...                 -> investing
 //   BKOFAMERICA ATM ... WITHDRWL              -> cash withdrawal
 //   PAYPAL DES:TRANSFER ID:ADD TO BALANCE     -> transfer to PayPal
 //
@@ -20,6 +21,7 @@ export type BankRule =
   | { kind: "SALARY"; label: string }
   | { kind: "OWN_TRANSFER"; label: string }
   | { kind: "INVESTMENT"; label: string }
+  | { kind: "REMITTANCE"; label: string }
   | { kind: "CASH_WITHDRAWAL"; label: string }
   | { kind: "PAYPAL_TOPUP"; label: string }
   | { kind: "UTILITY"; label: string }
@@ -39,7 +41,12 @@ const CARD_PAYEES: { line: RegExp; card: RegExp; label: string }[] = [
   { line: /\bBA\s*ELECTRONIC\s*PAYMENT\b|\bBANK\s*OF\s*AMERICA\b.*\bCREDIT\s*CARD\b/i, card: /bofa|bank of america|boa/i, label: "BofA card" },
 ];
 
-const INVESTMENT = /\bCYBRID\b|\bCROBO\b|\bCOINBASE\b|\bROBINHOOD\s*(SECURITIES|MONEY|CRYPTO|DES:\s*DEBITS)\b|\bFIDELITY\b|\bVANGUARD\b|\bSCHWAB\b|\bE\*?TRADE\b|\bACORNS\b|\bBETTERMENT\b|\bWEALTHFRONT\b|\bM1\s*FINANCE\b/i;
+// Money-transfer services sending dollars to an Indian bank account (Crobo
+// runs on Cybrid). Not spending and not investing: the money moves to your
+// own account abroad.
+const REMITTANCE = /\bCYBRID\b|\bCROBO\b|\bREMITLY\b|\bTRANSFERWISE\b|\bWISE\s*(US|INC|PAYMENTS)\b|\bXOOM\b|\bWESTERN\s*UNION\b|\bREMIT2INDIA\b/i;
+
+const INVESTMENT = /\bCOINBASE\b|\bROBINHOOD\s*(SECURITIES|MONEY|CRYPTO|DES:\s*DEBITS)\b|\bFIDELITY\b|\bVANGUARD\b|\bSCHWAB\b|\bE\*?TRADE\b|\bACORNS\b|\bBETTERMENT\b|\bWEALTHFRONT\b|\bM1\s*FINANCE\b/i;
 
 // Utility and phone billers that pay by bank transfer.
 const UTILITY = /\bDOMINION\s*ENERGY\b|\bCOMCAST\b|\bXFINITY\b|\bVERIZON\b|\bCITY\s*OF\s*RICHMOND\b|\bCITYOFRICHMOND\b|\bAT&T\b|\bT-?MOBILE\b|\bDUKE\s*ENERGY\b|\bPEPCO\b|\bWASHINGTON\s*GAS\b|\bSPECTRUM\b|\bCOX\s*COMM|\bWATER\s*(DEPT|UTILIT|BILL)/i;
@@ -57,6 +64,7 @@ export function classifyBankLine(description: string, opts: { moneyIn: boolean; 
     }
     if (/\bPAYPAL\b.*\b(ADD TO BALANCE|TRANSFER)\b/i.test(d)) return { kind: "PAYPAL_TOPUP", label: "Money moved to PayPal" };
     if (/\bATM\b.*\b(WITHDRWL|WITHDRAWAL|W\/D)\b|\bCASH WITHDRAWAL\b/i.test(d)) return { kind: "CASH_WITHDRAWAL", label: "ATM cash" };
+    if (REMITTANCE.test(d)) return { kind: "REMITTANCE", label: "Money sent to India" };
     if (INVESTMENT.test(d)) return { kind: "INVESTMENT", label: "Investing" };
     if (UTILITY.test(d)) return { kind: "UTILITY", label: "Utility bill" };
     if (/\bDES:\s*RENT\b|\bRENT\s*PAYMENT\b/i.test(d)) return { kind: "RENT", label: "Rent" };

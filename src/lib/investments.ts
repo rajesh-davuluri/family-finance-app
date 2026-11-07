@@ -174,6 +174,9 @@ export type HoldingInput = {
   priceAt: string | null; // ISO
   priceSource: string | null;
   trades: Trade[];
+  // In a retirement account (401(k), IRA, NPS): gains aren't taxed until
+  // withdrawal, so no long/short-term split or tax notes.
+  taxDeferred?: boolean;
 };
 
 export type NextLongTerm = { date: string; days: number; quantity: number; gain: number };
@@ -220,13 +223,13 @@ const STALE_DAYS = 7;
 
 export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   const rows: HoldingRow[] = holdings.map((h) => {
-    const lt = longTermDays(h.country, h.assetType);
+    const lt = h.taxDeferred ? null : longTermDays(h.country, h.assetType);
     const pos = position(h.trades, lt);
     const value = h.price !== null ? pos.quantity * h.price : null;
     let longTermGain: number | null = null;
     let shortTermGain: number | null = null;
     let nextLongTerm: NextLongTerm | null = null;
-    if (h.price !== null) {
+    if (h.price !== null && !h.taxDeferred) {
       longTermGain = 0;
       shortTermGain = 0;
       for (const lot of pos.lots) {
@@ -350,6 +353,7 @@ export function analyze(holdings: HoldingInput[], fx: Fx, today: string) {
   const realizedIndia = { lt: 0, st: 0, label: `FY ${fy}-${String(fy + 1).slice(2)}` };
   const realizedUs = { lt: 0, st: 0, label: year };
   for (const r of rows) {
+    if (r.taxDeferred) continue;
     for (const x of r.realized) {
       if (r.country === "IN" && indianFyStart(x.date) === fy) {
         if (x.longTerm) realizedIndia.lt += x.gain;
@@ -426,7 +430,8 @@ function buildInsights(a: {
       }
     }
   }
-  const sector = a.bySector.find((s) => s.key !== "Not set" && s.weight > 0.35);
+  // Funds already spread across sectors.
+  const sector = a.bySector.find((s) => s.key !== "Not set" && s.key !== "Index / Diversified" && s.weight > 0.35);
   if (sector) out.push({ level: "warn", text: `${pct(sector.weight)} is in ${sector.label}. A downturn in that one sector would hit a large part of the portfolio.` });
   const crypto = a.byAssetType.find((s) => s.key === "CRYPTO");
   if (crypto && crypto.weight > 0.1) {
@@ -463,7 +468,7 @@ function buildInsights(a: {
       text: `${a.realizedIndia.label}: up to ${fmtMoney("INR", Math.min(room, indiaLt))} of your ${fmtMoney("INR", indiaLt)} long-term gains on Indian shares and equity funds can be taken tax-free (₹1.25 lakh a year). Selling and buying back before 31 March resets your cost higher ("tax harvesting"). That is Indian tax only: if you're a US tax resident, the US taxes these gains when sold, so harvesting just brings US tax forward.`,
     });
   }
-  const usLosses = a.rows.filter((r) => r.country === "US" && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
+  const usLosses = a.rows.filter((r) => r.country === "US" && !r.taxDeferred && (r.gain ?? 0) < 0).sort((x, y) => x.gain! - y.gain!);
   if (usLosses.length) {
     const total = usLosses.reduce((s, r) => s + r.gain!, 0);
     out.push({
@@ -598,7 +603,7 @@ export function trackRecord(rows: HoldingRow[], today: string): CountryRecord[] 
     const winners = rs.filter((r) => (r.closed ? r.realizedGain : (r.gain ?? 0) + r.realizedGain) > 0).length;
 
     const byYear = new Map<string, number>();
-    for (const r of rs) {
+    for (const r of rs.filter((x) => !x.taxDeferred)) {
       for (const x of r.realized) {
         const label = country === "IN" ? `FY ${indianFyStart(x.date)}-${String(indianFyStart(x.date) + 1).slice(2)}` : x.date.slice(0, 4);
         byYear.set(label, (byYear.get(label) ?? 0) + x.gain);
@@ -616,11 +621,14 @@ export function trackRecord(rows: HoldingRow[], today: string): CountryRecord[] 
       lessons.push(`At ${(rate * 100).toFixed(1)}% a year you're ahead of a ${b.label} (about ${Math.round(b.rate * 100)}%). Keep the approach that's working.`);
     }
     if (missedTotal > 0 && soldEarly.length) {
+      const atLoss = soldEarly.filter((x) => (rs.find((r) => r.symbol === x.symbol)?.realizedGain ?? 0) < 0).map((x) => x.name || x.symbol);
       lessons.push(
         `Sold too early: ${soldEarly
           .slice(0, 3)
           .map((x) => x.name || x.symbol)
-          .join(", ")} are worth ${f(missedTotal)} more today than you sold them for. Winners often keep winning; selling them to lock in a small gain cuts that short.`,
+          .join(", ")} ${soldEarly.length === 1 ? "is" : "are"} worth ${f(missedTotal)} more today than you sold ${soldEarly.length === 1 ? "it" : "them"} for${
+          atLoss.length ? ` (${atLoss.join(", ")} sold at a loss, after a fall)` : ""
+        }. Selling a good company after a dip, or to lock in a small gain, has cost the most; deciding in advance why you'd sell helps.`,
       );
     }
     if (ipo && ipo.gain < 0) {
@@ -690,4 +698,77 @@ export function crossBorderChecklist(indiaInvestmentsUsd: number, indiaBankUsd: 
       text: "If foreign financial assets exceed $50,000 at year-end or $75,000 at any time (double for married filing jointly), Form 8938 goes with your return too.",
     },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Health check: the handful of ratios an analyst looks at first, each rated
+// against common rules of thumb (not rules).
+
+export type HealthStatus = "good" | "watch" | "act";
+export type Health = { key: string; label: string; value: string; status: HealthStatus; note: string };
+
+const rate = (v: number, watch: number, act: number, higherIsWorse = true): HealthStatus =>
+  higherIsWorse ? (v > act ? "act" : v > watch ? "watch" : "good") : v < act ? "act" : v < watch ? "watch" : "good";
+
+export function healthCheck(a: ReturnType<typeof analyze>, today: string): Health[] {
+  const open = a.rows.filter((r) => !r.closed);
+  if (!open.length) return [];
+  const pct = (w: number) => `${Math.round(w * 100)}%`;
+  const out: Health[] = [];
+
+  const singles = open.filter((r) => r.assetType === "STOCK" || r.assetType === "OTHER").sort((x, y) => y.weight - x.weight);
+  if (singles.length) {
+    const top = singles[0];
+    out.push({
+      key: "largest",
+      label: "Largest single stock",
+      value: pct(top.weight),
+      status: rate(top.weight, 0.1, 0.2),
+      note: `${top.name || top.symbol}. Under 10% keeps one company's bad news small.`,
+    });
+  }
+  // Funds already hold hundreds of companies: concentration is about single stocks.
+  const top3 = singles.slice(0, 3);
+  if (singles.length > 3) {
+    const w = top3.reduce((s, r) => s + r.weight, 0);
+    out.push({
+      key: "top3",
+      label: "Top 3 stocks",
+      value: pct(w),
+      status: rate(w, 0.4, 0.6),
+      note: top3.map((r) => r.name || r.symbol).join(", "),
+    });
+  }
+  const sector = a.bySector.filter((s) => s.key !== "Not set" && s.key !== "Index / Diversified")[0];
+  if (sector) {
+    out.push({ key: "sector", label: "Largest sector", value: pct(sector.weight), status: rate(sector.weight, 0.25, 0.35), note: sector.label });
+  }
+  const funds = a.byAssetType.filter((s) => s.key === "ETF" || s.key === "MUTUAL_FUND").reduce((s, x) => s + x.weight, 0);
+  out.push({
+    key: "funds",
+    label: "In funds and ETFs",
+    value: pct(funds),
+    status: rate(funds, 0.5, 0.2, false),
+    note: "Index funds spread risk across hundreds of companies at low cost.",
+  });
+  const crypto = a.byAssetType.find((s) => s.key === "CRYPTO")?.weight ?? 0;
+  out.push({ key: "crypto", label: "Crypto", value: pct(crypto), status: rate(crypto, 0.05, 0.1), note: "Above 5-10% a crash hurts the whole portfolio." });
+  const stale = open.filter((r) => r.value === null || !r.priceAt || daysBetween(r.priceAt.slice(0, 10), today) > STALE_DAYS);
+  out.push({
+    key: "prices",
+    label: "Prices up to date",
+    value: `${open.length - stale.length} of ${open.length}`,
+    status: stale.length === 0 ? "good" : stale.length <= 2 ? "watch" : "act",
+    note: stale.length ? `Refresh prices: ${stale.slice(0, 4).map((r) => r.symbol).join(", ")}${stale.length > 4 ? "..." : ""}` : "All refreshed within a week.",
+  });
+  return out;
+}
+
+// Shares that turn long-term within `days` (selling before then is taxed
+// as short-term), soonest first.
+export function turningLongTerm(rows: HoldingRow[], days = 120) {
+  return rows
+    .filter((r) => !r.closed && r.nextLongTerm && r.nextLongTerm.days <= days)
+    .map((r) => ({ id: r.id, symbol: r.symbol, name: r.name, currency: r.currency, country: r.country, ...r.nextLongTerm! }))
+    .sort((x, y) => x.days - y.days);
 }
