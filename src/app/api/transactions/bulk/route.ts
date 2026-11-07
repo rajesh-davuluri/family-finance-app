@@ -4,12 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { Currency } from "@/lib/enums";
 
-const rowSchema = z.object({
-  date: z.string(),
-  amount: z.number().positive(),
-  categoryId: z.string(),
-  notes: z.string().optional(),
-});
+// A row is either a transaction in a category, or -- for a card payment, a
+// top-up or cash moved to another account of the household -- a transfer
+// from the account being imported to that account.
+const rowSchema = z
+  .object({
+    date: z.string(),
+    amount: z.number().positive(),
+    categoryId: z.string().optional(),
+    transferToInstrumentId: z.string().optional(),
+    notes: z.string().optional(),
+  })
+  .refine((r) => !!r.categoryId !== !!r.transferToInstrumentId, { message: "Each row needs a category or a transfer account." });
 
 const bulkSchema = z.object({
   instrumentId: z.string(),
@@ -40,15 +46,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid instrument." }, { status: 400 });
   }
 
-  // Confirm every category referenced actually belongs to this household,
-  // in one query rather than one per row.
-  const categoryIds = Array.from(new Set(rows.map((r) => r.categoryId)));
+  const txnRows = rows.filter((r) => r.categoryId);
+  const transferRows = rows.filter((r) => r.transferToInstrumentId);
+
+  // Confirm every category and transfer account referenced belongs to this
+  // household, in one query each rather than one per row.
+  const categoryIds = Array.from(new Set(txnRows.map((r) => r.categoryId!)));
   const validCategories = await prisma.transactionCategory.findMany({
     where: { id: { in: categoryIds }, householdId: user.householdId },
     select: { id: true },
   });
   if (validCategories.length !== categoryIds.length) {
     return NextResponse.json({ error: "One or more categories are invalid." }, { status: 400 });
+  }
+  const targetIds = Array.from(new Set(transferRows.map((r) => r.transferToInstrumentId!)));
+  const validTargets = await prisma.paymentInstrument.count({
+    where: { id: { in: targetIds }, householdId: user.householdId, NOT: { id: instrumentId } },
+  });
+  if (validTargets !== targetIds.length) {
+    return NextResponse.json({ error: "One or more transfer accounts are invalid." }, { status: 400 });
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -66,13 +82,13 @@ export async function POST(req: Request) {
         createdById: user.id,
       },
     });
-    return tx.transaction.createMany({
-      data: rows.map((r) => ({
+    const created = await tx.transaction.createMany({
+      data: txnRows.map((r) => ({
         amount: r.amount,
         currency,
         date: new Date(r.date),
         notes: r.notes,
-        categoryId: r.categoryId,
+        categoryId: r.categoryId!,
         instrumentId,
         householdId: user.householdId,
         createdById: user.id,
@@ -80,7 +96,23 @@ export async function POST(req: Request) {
         source: "IMPORTED",
       })),
     });
+    const transfers = await tx.transfer.createMany({
+      data: transferRows.map((r) => ({
+        amount: r.amount,
+        currency,
+        date: new Date(r.date),
+        notes: r.notes,
+        fromInstrumentId: instrumentId,
+        toInstrumentId: r.transferToInstrumentId!,
+        householdId: user.householdId,
+        createdById: user.id,
+      })),
+    });
+    return { transactions: created.count, transfers: transfers.count };
   });
 
-  return NextResponse.json({ imported: result.count }, { status: 201 });
+  return NextResponse.json(
+    { imported: result.transactions + result.transfers, transactions: result.transactions, transfers: result.transfers },
+    { status: 201 }
+  );
 }

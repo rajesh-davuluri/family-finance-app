@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { describeExisting, loadForDuplicateCheck } from "@/lib/duplicateData";
-import { matchRows } from "@/lib/duplicates";
+import { DUPLICATE_WINDOW_DAYS, matchRows } from "@/lib/duplicates";
 
 // Pre-import duplicate check for the CSV/PDF import flow: for each row about
 // to be imported, find a transaction already in the app that's likely the
@@ -20,6 +20,8 @@ const checkSchema = z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         amount: z.number(),
         description: z.string().optional(),
+        // Money into the account (a deposit, a payment received).
+        moneyIn: z.boolean().optional(),
       })
     )
     .min(1)
@@ -51,12 +53,55 @@ export async function POST(req: Request) {
       instrumentId,
       notes: r.description ?? null,
       source: "IMPORTED",
+      moneyIn: r.moneyIn,
     })),
     existing
   );
 
-  const matches = found.map((m) => {
-    if (!m) return null;
+  // Card payments and other moves between accounts may already be recorded
+  // as transfers (e.g. entered on the Transfers page): same amount, same
+  // direction for this account, within a few days.
+  const transfers = await prisma.transfer.findMany({
+    where: {
+      householdId: user.householdId,
+      OR: [{ fromInstrumentId: instrumentId }, { toInstrumentId: instrumentId }],
+      date: {
+        gte: new Date(Date.parse(`${dates[0]}T00:00:00Z`) - DUPLICATE_WINDOW_DAYS * 86_400_000),
+        lt: new Date(Date.parse(`${dates[dates.length - 1]}T00:00:00Z`) + (DUPLICATE_WINDOW_DAYS + 1) * 86_400_000),
+      },
+    },
+    include: { fromInstrument: { select: { name: true } }, toInstrument: { select: { name: true } } },
+  });
+  const usedTransfers = new Set<string>();
+  const transferMatch = (r: (typeof rows)[number]) => {
+    const t = transfers.find(
+      (x) =>
+        !usedTransfers.has(x.id) &&
+        Math.round(Number(x.amount) * 100) === Math.round(Math.abs(r.amount) * 100) &&
+        (r.moneyIn ? x.toInstrumentId === instrumentId : x.fromInstrumentId === instrumentId) &&
+        Math.abs(Date.parse(`${r.date}T00:00:00Z`) - x.date.getTime()) <= DUPLICATE_WINDOW_DAYS * 86_400_000
+    );
+    if (!t) return null;
+    usedTransfers.add(t.id);
+    const days = Math.round(Math.abs(Date.parse(`${r.date}T00:00:00Z`) - t.date.getTime()) / 86_400_000);
+    return {
+      id: t.id,
+      date: t.date.toISOString().slice(0, 10),
+      amount: Number(t.amount),
+      currency: t.currency,
+      notes: t.notes,
+      categoryName: `Transfer ${t.fromInstrument.name} → ${t.toInstrument.name}`,
+      instrumentName: r.moneyIn ? t.toInstrument.name : t.fromInstrument.name,
+      source: "TRANSFER",
+      sameInstrument: true,
+      confidence: "HIGH" as const,
+      daysApart: days,
+      reason: `already recorded as a transfer, ${days === 0 ? "the same day" : `${days} day${days === 1 ? "" : "s"} apart`}`,
+    };
+  };
+
+  const matches = found.map((m, i) => {
+    if (!m) return transferMatch(rows[i]);
     const e = byId.get(m.id)!;
     return {
       ...describeExisting(e),

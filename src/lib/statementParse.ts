@@ -13,6 +13,10 @@ export type StatementRow = {
   description: string;
   amount: number; // always positive
   isCredit: boolean; // payment/refund/deposit -- money in
+  // The amount was printed with a minus sign or in brackets. On a card
+  // statement that marks a payment; on a bank statement, money out -- the
+  // caller decides which convention the file uses (see the Import page).
+  negative: boolean;
 };
 
 const MONTHS: Record<string, number> = {
@@ -153,7 +157,7 @@ export function parseStatementLines(
       isCredit = amount.cr || amount.negative || (!amount.dr && CREDIT_WORDS.test(r.description));
     }
     if (!(amount.value > 0)) continue;
-    rows.push({ date: iso(year, month, day), description: r.description.slice(0, 200), amount: amount.value, isCredit });
+    rows.push({ date: iso(year, month, day), description: r.description.slice(0, 200), amount: amount.value, isCredit, negative: amount.negative });
   }
   return rows;
 }
