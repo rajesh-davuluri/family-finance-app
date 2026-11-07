@@ -16,6 +16,9 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.savingsGoal.deleteMany({ where: { householdId } }),
     prisma.notification.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
+    prisma.policyDocument.deleteMany({ where: { policy: { householdId } } }),
+    prisma.insurancePolicy.deleteMany({ where: { householdId } }),
+    prisma.accountDetails.deleteMany({ where: { instrument: { householdId } } }),
     prisma.importBatch.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
@@ -48,6 +51,7 @@ export async function deleteInstrumentCascade(instrumentId: string) {
     prisma.recurringTemplate.deleteMany({ where: { instrumentId } }),
     // Import records whose transactions were all deleted since.
     prisma.importBatch.deleteMany({ where: { instrumentId } }),
+    prisma.accountDetails.deleteMany({ where: { instrumentId } }),
     prisma.paymentInstrument.delete({ where: { id: instrumentId } }),
   ]);
 }
@@ -77,5 +81,14 @@ export async function deleteDebtCascade(debtId: string) {
   await prisma.$transaction([
     prisma.debtPayment.deleteMany({ where: { debtId } }),
     prisma.debt.delete({ where: { id: debtId } }),
+  ]);
+}
+// A policy's documents go with it; premiums already paid stay as ordinary
+// transactions, just no longer linked to a policy.
+export async function deletePolicyCascade(policyId: string) {
+  await prisma.$transaction([
+    prisma.transaction.updateMany({ where: { policyId }, data: { policyId: null } }),
+    prisma.policyDocument.deleteMany({ where: { policyId } }),
+    prisma.insurancePolicy.delete({ where: { id: policyId } }),
   ]);
 }

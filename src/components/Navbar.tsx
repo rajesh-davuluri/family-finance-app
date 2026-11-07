@@ -22,6 +22,7 @@ const primaryLinks = [
 
 const moreLinks = [
   { href: "/reports", label: "Reports" },
+  { href: "/policies", label: "Policies" },
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
   { href: "/import", label: "Import" },
