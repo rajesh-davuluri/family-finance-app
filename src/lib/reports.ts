@@ -5,6 +5,7 @@
 
 import { merchantKeys } from "@/lib/merchantKey";
 import { CategoryKind, countsAsSpending, flowOf } from "@/lib/categoryKind";
+import { CategoryGroup, GROUP_LABELS } from "@/lib/categoryGroups";
 
 // Spending follows each category's kind (src/lib/categoryKind.ts): refunds
 // reduce it, and savings, card payments/transfers and loans aren't part of it.
@@ -21,6 +22,7 @@ export type ReportTransaction = {
   categoryName: string;
   direction: "INCOME" | "EXPENSE";
   kind: CategoryKind;
+  group: CategoryGroup;
   instrumentId: string;
   instrumentName: string;
   source: string;
@@ -122,6 +124,15 @@ export function spendingSummary(txns: ReportTransaction[], from: string, to: str
     days: daysBetween(from, to),
     dailyAverage: round(spent / Math.max(1, daysBetween(from, to))),
     byCategory: group(spendingRows, (t) => [t.categoryId, t.categoryName], spend),
+    // Groups, each with its categories (largest first).
+    byGroup: group(spendingRows, (t) => [t.group, GROUP_LABELS[t.group]], spend).map((g) => ({
+      ...g,
+      categories: group(
+        spendingRows.filter((t) => t.group === g.key),
+        (t) => [t.categoryId, t.categoryName],
+        spend
+      ),
+    })),
     byAccount: group(spendingRows, (t) => [t.instrumentId, t.instrumentName], spend),
     topMerchants: topMerchants(purchases),
     incomeByCategory: group(income, (t) => [t.categoryId, t.categoryName], (t) => t.usd),

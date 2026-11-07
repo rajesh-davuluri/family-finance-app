@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { inferKind } from "@/lib/categoryKind";
+import { inferGroup } from "@/lib/categoryGroups";
 
 // Two signup paths, distinguished by whether `inviteCode` is present:
 //   - No inviteCode  -> creates a brand-new household, this person becomes ADMIN
@@ -76,7 +77,13 @@ export async function POST(req: Request) {
     ];
     for (const cat of defaultCategories) {
       await tx.transactionCategory.create({
-        data: { ...cat, kind: inferKind(cat.name, cat.direction), householdId: household.id, isDefault: true },
+        data: {
+          ...cat,
+          kind: inferKind(cat.name, cat.direction),
+          group: inferGroup(cat.name, inferKind(cat.name, cat.direction)),
+          householdId: household.id,
+          isDefault: true,
+        },
       });
     }
 

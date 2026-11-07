@@ -4,11 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { TransactionDirection } from "@/lib/enums";
 import { CategoryKind, isKindAllowed, kindOf } from "@/lib/categoryKind";
+import { CategoryGroup, groupOf } from "@/lib/categoryGroups";
 
 const createSchema = z.object({
   name: z.string().min(1),
   direction: TransactionDirection,
   kind: CategoryKind.optional(),
+  group: CategoryGroup.optional(),
 });
 
 export async function GET() {
@@ -21,7 +23,15 @@ export async function GET() {
   });
   // effectiveKind is the stored kind, or the guess from the name when none
   // has been chosen yet.
-  return NextResponse.json(categories.map((c) => ({ ...c, effectiveKind: kindOf(c), kindGuessed: !c.kind })));
+  return NextResponse.json(
+    categories.map((c) => ({
+      ...c,
+      effectiveKind: kindOf(c),
+      kindGuessed: !c.kind,
+      effectiveGroup: groupOf(c),
+      groupGuessed: !c.group,
+    }))
+  );
 }
 
 export async function POST(req: Request) {

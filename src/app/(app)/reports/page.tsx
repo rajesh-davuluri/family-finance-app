@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { SOURCE_LABELS, TransactionSource } from "@/lib/lastActivity";
+import { GROUP_LABELS } from "@/lib/categoryGroups";
 import {
   CardCheck,
   ReportTransaction,
@@ -159,6 +160,7 @@ export default function ReportsPage() {
         ["Totals", "Received", summary.received, summary.incomeCount, ""],
         ["Totals", "Net", summary.net, "", ""],
         ["Totals", "Daily average spent", summary.dailyAverage, "", ""],
+        ...summary.byGroup.map((g) => ["Spending by group", g.label, g.total, g.count, Math.round(g.share * 100)]),
         ...summary.byCategory.map((c) => ["Spending by category", c.label, c.total, c.count, Math.round(c.share * 100)]),
         ...summary.byAccount.map((c) => ["Spending by account", c.label, c.total, c.count, Math.round(c.share * 100)]),
         ...summary.topMerchants.map((c) => ["Top merchants", c.label, c.total, c.count, Math.round(c.share * 100)]),
@@ -169,11 +171,12 @@ export default function ReportsPage() {
       download(
         `${base}.csv`,
         toCsv(
-          ["Date", "Description", "Category", "Type", "Account", "Amount", "Currency", "Approx USD", "Added", "Added by"],
+          ["Date", "Description", "Category", "Group", "Type", "Account", "Amount", "Currency", "Approx USD", "Added", "Added by"],
           listed.map((t) => [
             t.date,
             t.notes,
             t.categoryName,
+            GROUP_LABELS[t.group],
             t.direction === "INCOME" ? "Income" : "Expense",
             t.instrumentName,
             t.amount.toFixed(2),
@@ -409,6 +412,50 @@ function ShareTable({
   );
 }
 
+// Spending by group; click a group to see its categories.
+function GroupTable({ groups }: { groups: ReturnType<typeof spendingSummary>["byGroup"] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (groups.length === 0) return <p className="text-sm text-gray-400">No spending in this period.</p>;
+  return (
+    <table className="w-full text-sm">
+      <tbody>
+        {groups.map((g) => (
+          <Fragment key={g.key}>
+            <tr
+              className="cursor-pointer border-b last:border-0 hover:bg-gray-50"
+              onClick={() => setOpen(open === g.key ? null : g.key)}
+              aria-expanded={open === g.key}
+            >
+              <td className="py-1.5 pr-3">
+                <span className="mr-1 inline-block w-3 text-xs text-gray-400 print:hidden">{open === g.key ? "▾" : "▸"}</span>
+                {g.label}
+              </td>
+              <td className="hidden w-1/3 py-1.5 pr-3 sm:table-cell" aria-hidden>
+                <span className="block h-1.5 rounded-r bg-expense-500" style={{ width: `${Math.max(2, g.share * 100)}%` }} />
+              </td>
+              <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{usd(g.total)}</td>
+              <td className="w-12 whitespace-nowrap py-1.5 text-right text-xs tabular-nums text-gray-400">
+                {Math.round(g.share * 100)}%
+              </td>
+            </tr>
+            {open === g.key &&
+              g.categories.map((c) => (
+                <tr key={c.key} className="border-b bg-gray-50/60 text-gray-600">
+                  <td className="py-1 pl-7 pr-3 text-xs">{c.label}</td>
+                  <td className="hidden sm:table-cell" />
+                  <td className="whitespace-nowrap py-1 pr-3 text-right text-xs tabular-nums">{usd(c.total)}</td>
+                  <td className="w-12 whitespace-nowrap py-1 text-right text-xs tabular-nums text-gray-400">
+                    {plural(c.count, "txn")}
+                  </td>
+                </tr>
+              ))}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> }) {
   const tiles = [
     {
@@ -432,8 +479,8 @@ function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> 
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel title="Spending by category">
-          <ShareTable rows={summary.byCategory} empty="No spending in this period." />
+        <Panel title="Spending by group" note="click a group for its categories">
+          <GroupTable groups={summary.byGroup} />
         </Panel>
         <Panel title="Spending by card / account">
           <ShareTable rows={summary.byAccount} empty="No spending in this period." />

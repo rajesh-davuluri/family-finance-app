@@ -4,9 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { deleteCategoryCascade } from "@/lib/cascadeDelete";
 import { CategoryKind, isKindAllowed } from "@/lib/categoryKind";
+import { CategoryGroup } from "@/lib/categoryGroups";
 
-// Set (or clear, with null) how a category's transactions count in totals.
-const patchSchema = z.object({ kind: CategoryKind.nullable() });
+// Set (or clear, with null) how a category's transactions count in totals,
+// and/or which group it rolls up into.
+const patchSchema = z
+  .object({ kind: CategoryKind.nullable().optional(), group: CategoryGroup.nullable().optional() })
+  .refine((d) => d.kind !== undefined || d.group !== undefined, { message: "Nothing to change." });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,13 +24,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const { kind } = parsed.data;
+  const { kind, group } = parsed.data;
   const direction = category.direction === "INCOME" ? "INCOME" : "EXPENSE";
   if (kind && !isKindAllowed(kind, direction)) {
     return NextResponse.json({ error: "That type doesn't fit this category's direction." }, { status: 400 });
   }
 
-  const updated = await prisma.transactionCategory.update({ where: { id }, data: { kind } });
+  const updated = await prisma.transactionCategory.update({
+    where: { id },
+    data: { ...(kind !== undefined ? { kind } : {}), ...(group !== undefined ? { group } : {}) },
+  });
   return NextResponse.json(updated);
 }
 
