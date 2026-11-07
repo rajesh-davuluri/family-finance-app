@@ -616,11 +616,14 @@ export function trackRecord(rows: HoldingRow[], today: string): CountryRecord[] 
       lessons.push(`At ${(rate * 100).toFixed(1)}% a year you're ahead of a ${b.label} (about ${Math.round(b.rate * 100)}%). Keep the approach that's working.`);
     }
     if (missedTotal > 0 && soldEarly.length) {
+      const atLoss = soldEarly.filter((x) => (rs.find((r) => r.symbol === x.symbol)?.realizedGain ?? 0) < 0).map((x) => x.name || x.symbol);
       lessons.push(
         `Sold too early: ${soldEarly
           .slice(0, 3)
           .map((x) => x.name || x.symbol)
-          .join(", ")} are worth ${f(missedTotal)} more today than you sold them for. Winners often keep winning; selling them to lock in a small gain cuts that short.`,
+          .join(", ")} ${soldEarly.length === 1 ? "is" : "are"} worth ${f(missedTotal)} more today than you sold ${soldEarly.length === 1 ? "it" : "them"} for${
+          atLoss.length ? ` (${atLoss.join(", ")} sold at a loss, after a fall)` : ""
+        }. Selling a good company after a dip, or to lock in a small gain, has cost the most; deciding in advance why you'd sell helps.`,
       );
     }
     if (ipo && ipo.gain < 0) {
