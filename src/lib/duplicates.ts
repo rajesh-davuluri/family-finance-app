@@ -29,6 +29,9 @@ export type DupTxn = {
   notes: string | null;
   source: string; // MANUAL | IMPORTED | EMAIL | TELEGRAM | RECURRING
   importBatchId?: string | null;
+  // Money into the account (income-type category, a deposit). When both
+  // sides say, they must agree: $700 in is never a copy of $700 out.
+  moneyIn?: boolean;
 };
 
 export type Confidence = "HIGH" | "MEDIUM";
@@ -43,6 +46,7 @@ const fromStatement = (source: string) => source === "IMPORTED" || source === "E
 // How likely `a` and `b` are one purchase recorded twice; null when not.
 export function compare(a: Omit<DupTxn, "id">, b: DupTxn): DupMatch | null {
   if (a.currency !== b.currency || cents(a.amount) !== cents(b.amount)) return null;
+  if (a.moneyIn !== undefined && b.moneyIn !== undefined && a.moneyIn !== b.moneyIn) return null;
   const days = daysApart(a.date, b.date);
   if (days > DUPLICATE_WINDOW_DAYS) return null;
   if (a.importBatchId && a.importBatchId === b.importBatchId) return null;

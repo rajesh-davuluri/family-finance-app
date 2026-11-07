@@ -63,7 +63,18 @@ export default function Navbar() {
   return (
     <nav className="bg-ink-900 print:hidden">
       <div className="mx-auto flex max-w-6xl items-center px-4 py-3">
-        <span className="font-display mr-8 whitespace-nowrap text-lg italic text-brand-300">Family Finance</span>
+        {/* Clicking the name reloads the current page (fresh data everywhere on it). */}
+        <a
+          href={pathname ?? "/dashboard"}
+          onClick={(e) => {
+            e.preventDefault();
+            window.location.reload();
+          }}
+          title="Refresh this page"
+          className="font-display mr-8 whitespace-nowrap text-lg italic text-brand-300 hover:text-brand-100"
+        >
+          Family Finance
+        </a>
 
         <div className="hidden flex-1 items-center gap-5 sm:flex">
           {primaryLinks.map((link) => (

@@ -7,9 +7,12 @@ import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { parseStatementLines } from "@/lib/statementParse";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
+import { useSession } from "next-auth/react";
+import { classifyBankLine, moneyInSign, stripCsvPreamble } from "@/lib/bankRules";
+import { NewCategory, ruleOverridesHistory, targetForRule } from "@/lib/importRules";
 
-type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
-type Instrument = { id: string; name: string; currency: string; archived: boolean };
+type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; effectiveKind?: string };
+type Instrument = { id: string; name: string; currency: string; archived: boolean; type: string; last4: string | null };
 
 type ExistingMatch = {
   id: string;
@@ -58,6 +61,12 @@ type PreviewRow = {
   // Existing transaction with the same date + amount, found when the preview
   // was built. Only shown while the row's date/amount still match it.
   match: ExistingMatch | null;
+  // Set for a card payment (or a top-up / cash) recognised on a bank
+  // statement: imported as a transfer to this account instead of a
+  // transaction in a category.
+  transferToId: string | null;
+  // What the bank-line rules recognised, e.g. "Citi card payment".
+  ruleLabel: string | null;
 };
 
 function isAutoCategorized(r: PreviewRow) {
@@ -103,6 +112,10 @@ export default function ImportPage() {
   const [loaded, setLoaded] = useState(false);
 
   const [rows, setRows] = useState<PreviewRow[]>([]);
+  // Categories proposed by the bank-line rules that don't exist yet; created
+  // on import only if a row still uses them.
+  const [newCategories, setNewCategories] = useState<NewCategory[]>([]);
+  const { data: session } = useSession();
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -176,7 +189,9 @@ export default function ImportPage() {
       return;
     }
 
-    Papa.parse<Record<string, string>>(file, {
+    // Bank downloads often start with summary lines before the real header.
+    const text = stripCsvPreamble(await file.text());
+    Papa.parse<Record<string, string>>(text, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
@@ -235,6 +250,12 @@ export default function ImportPage() {
         );
         return;
       }
+      // Card statements print payments with a minus sign; bank statements
+      // print money out that way. When most rows are negative it's a bank
+      // statement: minus = money out, everything else = money in.
+      if (found.filter((r) => r.negative).length > found.length / 2) {
+        found.forEach((r) => (r.isCredit = !r.negative));
+      }
       const credits = found.filter((r) => r.isCredit).length;
       setHeaders(Object.values(PDF_COLUMNS));
       setRawRows(
@@ -266,7 +287,7 @@ export default function ImportPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         instrumentId,
-        rows: preview.map((r) => ({ date: r.date, amount: r.amount, description: r.rawDescription })),
+        rows: preview.map((r) => ({ date: r.date, amount: r.amount, description: r.rawDescription, moneyIn: r.isCredit })),
       }),
     });
     if (!res.ok) return null;
@@ -296,21 +317,35 @@ export default function ImportPage() {
     setError(null);
     setShowOnlyDuplicates(false);
     const defaultCategoryId = bulkCategoryId;
-    const preview: PreviewRow[] = rawRows.map((r) => {
+    const incomeCategories = categories.filter((c) => c.direction === "INCOME");
+    const defaultIncomeCategoryId = (incomeCategories.find((c) => /other income/i.test(c.name)) ?? incomeCategories[0] ?? { id: bulkCategoryId }).id;
+    const signed = (r: Record<string, string>) => parseFloat((r[columnMap.amount] ?? "").replace(/[^0-9.-]/g, ""));
+    // Rows without an amount (e.g. "Beginning balance as of ...") aren't transactions.
+    const dataRows = rawRows.filter((r) => Number.isFinite(signed(r)) && signed(r) !== 0);
+    // A CSV with both positive and negative amounts: whichever sign most rows
+    // have is money out (banks list debits negative; card files the reverse).
+    const signs = dataRows.map(signed);
+    const mixed = signs.some((a) => a > 0) && signs.some((a) => a < 0);
+    const inSign = moneyInSign(signs);
+    const preview: PreviewRow[] = dataRows.map((r) => {
       const rawAmount = r[columnMap.amount] ?? "";
-      const amount = Math.abs(parseFloat(rawAmount.replace(/[^0-9.-]/g, "")) || 0);
-      const isCredit = (r[PDF_COLUMNS.type] ?? "").trim().toLowerCase() === "credit";
+      const amount = Math.abs(signed(r));
+      const typeCol = (r[PDF_COLUMNS.type] ?? "").trim().toLowerCase();
+      const isCredit = typeCol ? typeCol === "credit" : mixed && Math.sign(signed(r)) === inSign;
       return {
         rawDate: r[columnMap.date] ?? "",
         rawDescription: r[columnMap.description] ?? "",
         rawAmount,
         date: normalizeDate(r[columnMap.date] ?? ""),
         amount,
-        categoryId: defaultCategoryId,
+        // Money in defaults to an income category, money out to the chosen one.
+        categoryId: isCredit ? defaultIncomeCategoryId : defaultCategoryId,
         suggestedCategoryId: null,
         include: amount > 0 && !isCredit,
         isCredit,
         match: null,
+        transferToId: null,
+        ruleLabel: null,
       };
     });
 
@@ -320,18 +355,45 @@ export default function ImportPage() {
     setChecking(true);
     const [matches, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
     setChecking(false);
-    const knownCategoryIds = new Set(categories.map((c) => c.id));
+    // Learned suggestions only when they point the right way (money in ->
+    // an income category, money out -> an expense one).
+    const categoryById = new Map(categories.map((c) => [c.id, c]));
     suggestions?.forEach((sug, i) => {
-      if (sug && knownCategoryIds.has(sug.categoryId)) {
-        preview[i].categoryId = sug.categoryId;
-        preview[i].suggestedCategoryId = sug.categoryId;
+      const c = sug && categoryById.get(sug.categoryId);
+      if (c && (c.direction === "INCOME") === preview[i].isCredit) {
+        preview[i].categoryId = c.id;
+        preview[i].suggestedCategoryId = c.id;
       }
     });
+
+    // Standard bank lines -- card payments, paychecks, transfers between your
+    // own accounts, investing, ATM cash -- get the right treatment.
+    const proposedNew = new Map<string, NewCategory>();
+    const ownNames = [session?.user?.name ?? ""].filter(Boolean);
+    preview.forEach((row) => {
+      const rule = classifyBankLine(row.rawDescription, { moneyIn: row.isCredit, ownNames });
+      if (!rule) return;
+      if (!ruleOverridesHistory(rule) && row.suggestedCategoryId) return;
+      const target = targetForRule(rule, row.isCredit, { categories, instruments, importInstrumentId: instrumentId });
+      if (!target.categoryId && !target.transferToId) return;
+      row.ruleLabel = target.label;
+      if (target.transferToId) row.transferToId = target.transferToId;
+      if (target.categoryId) {
+        row.categoryId = target.categoryId;
+        row.suggestedCategoryId = target.categoryId;
+      }
+      if (target.newCategory) proposedNew.set(target.newCategory.id, target.newCategory);
+      // A recognised paycheck or transfer in is worth importing too.
+      if (row.isCredit) row.include = row.amount > 0;
+    });
+    setNewCategories(Array.from(proposedNew.values()));
     if (matches) {
       preview.forEach((r, i) => {
         r.match = matches[i] ?? null;
-        // Likely duplicates start unchecked; possible ones stay checked but flagged.
-        if (r.match?.confidence === "HIGH") r.include = false;
+        // Anything that looks already recorded on this account starts
+        // unchecked (re-importing a statement must not double it); a "maybe"
+        // on another account stays checked but flagged.
+        if (r.match && (r.match.confidence === "HIGH" || r.match.sameInstrument)) r.include = false;
       });
     } else {
       setError("Couldn't check for transactions already in the app — review the rows carefully before importing.");
@@ -355,6 +417,23 @@ export default function ImportPage() {
     setSubmitting(true);
     const included = rows.filter((r) => r.include);
     const dates = rows.map((r) => r.date).sort();
+
+    // Create any proposed categories (e.g. "Transfer In") that included rows use.
+    const realId = new Map<string, string>();
+    for (const nc of newCategories) {
+      if (!included.some((r) => !r.transferToId && r.categoryId === nc.id)) continue;
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nc.name, direction: nc.direction, kind: nc.kind, group: nc.group }),
+      });
+      if (!res.ok) {
+        setSubmitting(false);
+        setError(`Couldn't create the "${nc.name}" category — pick another category for those rows.`);
+        return;
+      }
+      realId.set(nc.id, (await res.json()).id);
+    }
     const res = await fetch("/api/transactions/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -364,7 +443,9 @@ export default function ImportPage() {
         rows: included.map((r) => ({
           date: r.date,
           amount: r.amount,
-          categoryId: r.categoryId,
+          ...(r.transferToId
+            ? { transferToInstrumentId: r.transferToId }
+            : { categoryId: realId.get(r.categoryId) ?? r.categoryId }),
           notes: r.rawDescription || undefined,
         })),
         file: {
@@ -383,7 +464,12 @@ export default function ImportPage() {
       return;
     }
     const body = await res.json();
-    setResultMessage(`Imported ${body.imported} transaction${body.imported === 1 ? "" : "s"}.`);
+    setResultMessage(
+      `Imported ${body.transactions} transaction${body.transactions === 1 ? "" : "s"}${
+        body.transfers ? ` and ${body.transfers} transfer${body.transfers === 1 ? "" : "s"} (card payments and moves between accounts)` : ""
+      }.`
+    );
+    setNewCategories([]);
     setStep("upload");
     setRawRows([]);
     setRows([]);
@@ -577,8 +663,8 @@ export default function ImportPage() {
               <span>
                 {duplicateCount} of {rows.length} row{rows.length === 1 ? "" : "s"} look like a transaction already in the
                 app (same amount on this account within a few days — e.g. typed in by hand or sent from Telegram before
-                the statement). Likely ones are unchecked so they won&apos;t be imported again; &ldquo;maybe&rdquo; ones stay
-                checked. Tick or untick as needed.
+                the statement, or recorded as a transfer). They&apos;re unchecked so they won&apos;t be imported again —
+                tick any that are genuinely new.
               </span>
               <label className="flex items-center gap-1.5 text-xs">
                 <input
@@ -672,7 +758,7 @@ export default function ImportPage() {
                       {r.isCredit && (
                         <span
                           className="mr-1 rounded bg-income-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-income-600"
-                          title="Money in — a payment, refund or deposit. Unchecked by default."
+                          title="Money in — a deposit, payment or refund. Unchecked unless it was recognised (a paycheck, a transfer from your own account)."
                         >
                           credit
                         </span>
@@ -689,22 +775,51 @@ export default function ImportPage() {
                       />
                     </td>
                     <td className="p-2">
-                      <select
-                        value={r.categoryId}
-                        onChange={(e) => updateRow(i, { categoryId: e.target.value })}
-                        className="rounded border px-2 py-1 text-xs"
-                      >
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      {isAutoCategorized(r) && (
+                      {r.transferToId ? (
+                        <span className="flex flex-wrap items-center gap-1">
+                          <span className="text-xs text-gray-500">Transfer to</span>
+                          <select
+                            aria-label="Transfer to account"
+                            value={r.transferToId}
+                            onChange={(e) =>
+                              updateRow(i, e.target.value ? { transferToId: e.target.value } : { transferToId: null })
+                            }
+                            className="rounded border px-2 py-1 text-xs"
+                          >
+                            {instruments
+                              .filter((x) => !x.archived && x.id !== instrumentId)
+                              .map((x) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.name}
+                                </option>
+                              ))}
+                            <option value="">— use a category instead</option>
+                          </select>
+                        </span>
+                      ) : (
+                        <select
+                          value={r.categoryId}
+                          onChange={(e) => updateRow(i, { categoryId: e.target.value })}
+                          className="rounded border px-2 py-1 text-xs"
+                        >
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                          {newCategories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} (new)
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {!r.transferToId && isAutoCategorized(r) && (
                         <span className="ml-1">
                           <AutoBadge />
                         </span>
                       )}
+                      {r.ruleLabel && <span className="mt-0.5 block text-[11px] text-brand-700">{r.ruleLabel}</span>}
                     </td>
                     <td className="p-2 text-xs">
                       {dup && r.match ? (

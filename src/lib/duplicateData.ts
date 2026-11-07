@@ -13,7 +13,7 @@ export async function loadForDuplicateCheck(householdId: string, fromDate: strin
   const rows = await prisma.transaction.findMany({
     where: { householdId, date: { gte: from, lt: to } },
     include: {
-      category: { select: { name: true } },
+      category: { select: { name: true, direction: true } },
       instrument: { select: { name: true } },
       importBatch: { select: { fileName: true } },
     },
@@ -28,6 +28,7 @@ export async function loadForDuplicateCheck(householdId: string, fromDate: strin
     notes: t.notes,
     source: sourceOf(t),
     importBatchId: t.importBatchId,
+    moneyIn: t.category.direction === "INCOME",
     createdAt: t.createdAt.toISOString(),
     // for showing the match
     categoryName: t.category.name,
