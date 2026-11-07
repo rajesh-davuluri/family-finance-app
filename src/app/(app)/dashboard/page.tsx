@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { money } from "@/lib/money";
+import { TRANSACTIONS_CHANGED } from "@/lib/events";
+
+import { useEffect, useState, useRef } from "react";
 import { CategoryBarChart } from "@/components/DashboardCharts";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import CollapsibleSection from "@/components/CollapsibleSection";
@@ -110,7 +113,7 @@ function SummaryCard({
         {label}
         {onClick && <span className="ml-1 text-xs text-brand-600">(click for breakdown)</span>}
       </p>
-      <p className={`mt-1 font-display text-2xl font-semibold ${colorClass}`}>${value.toFixed(2)}</p>
+      <p className={`mt-1 font-display text-2xl font-semibold ${colorClass}`}>{money(value)}</p>
     </button>
   );
 }
@@ -230,6 +233,14 @@ export default function DashboardPage() {
       .catch(() => setLastActivity(null));
   }
 
+  // A transaction added from the bottom bar's ＋ (any page) refreshes this one.
+  const onTransactionsChanged = useRef<() => void>(() => {});
+  useEffect(() => {
+    const h = () => onTransactionsChanged.current();
+    window.addEventListener(TRANSACTIONS_CHANGED, h);
+    return () => window.removeEventListener(TRANSACTIONS_CHANGED, h);
+  }, []);
+
   function handleTransactionAdded() {
     setShowAddModal(false);
     loadSummary();
@@ -245,6 +256,10 @@ export default function DashboardPage() {
     setSelectedInstrument(null);
     setInstrumentTxns(null);
   }
+  useEffect(() => {
+    onTransactionsChanged.current = handleTransactionAdded;
+  });
+
 
   function openPanel(panel: Panel, kind: Kind) {
     const closing = expandedPanel === panel && expandedKind === kind;
@@ -311,9 +326,10 @@ export default function DashboardPage() {
             </p>
           )}
         </div>
+        {/* On a phone the bottom bar's ＋ does this. */}
         <button
           onClick={() => setShowAddModal(true)}
-          className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+          className="hidden rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 sm:block"
         >
           Add Transaction
         </button>
@@ -346,7 +362,7 @@ export default function DashboardPage() {
                 <span className="flex items-center gap-3">
                   <span className="text-gray-400">{formatDate(b.nextRunAt)}</span>
                   <span className={`font-medium ${b.category.direction === "INCOME" ? "text-income-600" : "text-expense-600"}`}>
-                    {b.currency} {Number(b.amount).toFixed(2)}
+                    {money(Number(b.amount), b.currency)}
                   </span>
                 </span>
               </div>
@@ -453,7 +469,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between text-sm">
                     <span>{b.category.name}</span>
                     <span className={over ? "text-expense-600" : "text-gray-500"}>
-                      ${b.spent.toFixed(2)} / ${limit.toFixed(2)}
+                      {money(b.spent)} / {money(limit)}
                     </span>
                   </div>
                   <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100">
@@ -513,7 +529,7 @@ export default function DashboardPage() {
         <div className="rounded-lg border bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium text-gray-700">
-              {selectedInstrument.name} transactions — ${selectedInstrument.total.toFixed(2)} total
+              {selectedInstrument.name} transactions — {money(selectedInstrument.total)} total
             </h2>
             <button
               onClick={() => {
@@ -543,7 +559,7 @@ export default function DashboardPage() {
                     <td className="py-2">{formatDate(t.date)}</td>
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
                     <td className="py-2 text-right font-medium text-expense-600">
-                      {t.currency} {Number(t.amount).toFixed(2)}
+                      {money(Number(t.amount), t.currency)}
                     </td>
                   </tr>
                 ))}
@@ -636,7 +652,7 @@ export default function DashboardPage() {
         <div className="rounded-lg border bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium text-gray-700">
-              {selectedCategory.name} transactions — ${selectedCategory.total.toFixed(2)} total
+              {selectedCategory.name} transactions — {money(selectedCategory.total)} total
             </h2>
             <button
               onClick={() => {
@@ -668,7 +684,7 @@ export default function DashboardPage() {
                     <td className="py-2 text-gray-500">{t.notes || "—"}</td>
                     <td className="py-2">{t.instrument.name}</td>
                     <td className={`py-2 text-right font-medium ${expandedKind === "income" ? "text-income-600" : "text-expense-600"}`}>
-                      {t.currency} {Number(t.amount).toFixed(2)}
+                      {money(Number(t.amount), t.currency)}
                     </td>
                   </tr>
                 ))}
@@ -701,7 +717,7 @@ export default function DashboardPage() {
                     a.direction === "INCOME" ? "text-income-600" : a.direction === "EXPENSE" ? "text-expense-600" : "text-gray-500"
                   }`}
                 >
-                  {a.currency} {a.amount.toFixed(2)}
+                  {money(a.amount, a.currency)}
                 </span>
               </div>
             ))}
@@ -736,7 +752,7 @@ function LastAddedLine({ lastActivity }: { lastActivity: LastActivity }) {
       <span className="font-medium">Last transaction added:</span> {formatDateTime(last.createdAt)} by{" "}
       {last.createdByName} — {last.categoryName} ·{" "}
       <span className={last.direction === "INCOME" ? "text-income-600" : "text-expense-600"}>
-        {last.currency} {last.amount.toFixed(2)}
+        {money(last.amount, last.currency)}
       </span>{" "}
       on {last.instrumentName}, dated {formatDate(last.date)} ({SOURCE_LABELS[last.source]}).
       {stale && (
@@ -772,7 +788,39 @@ function LastTransactionPerAccount({ instruments }: { instruments: LastActivity[
       title="Last transaction on each card & account"
       summary={`${instruments.length} account${instruments.length === 1 ? "" : "s"}`}
     >
-      <div className="overflow-x-auto">
+      {/* Phone: one line per account, the amount always visible. */}
+      <ul className="divide-y text-sm md:hidden">
+        {sorted.map((i) => {
+          const t = i.latestTransaction;
+          const stale = t !== null && daysSince(t.date) >= STALE_AFTER_DAYS;
+          return (
+            <li key={i.id} className="py-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 truncate font-medium">
+                  {i.name}
+                  {i.last4 && <span className="font-normal text-gray-400"> ··{i.last4}</span>}
+                </span>
+                {t && (
+                  <span className={`shrink-0 font-medium tabular-nums ${t.direction === "INCOME" ? "text-income-600" : "text-expense-600"}`}>
+                    {money(t.amount, t.currency)}
+                  </span>
+                )}
+              </div>
+              {t ? (
+                <p className="mt-0.5 truncate text-xs text-gray-500">
+                  <span className={stale ? "font-medium text-amber-700" : ""}>
+                    {formatDate(t.date)} · {daysSince(t.date)}d ago
+                  </span>{" "}
+                  · {t.notes || t.categoryName}
+                </p>
+              ) : (
+                <p className="mt-0.5 text-xs text-gray-400">No transactions yet</p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-gray-500">
@@ -813,7 +861,7 @@ function LastTransactionPerAccount({ instruments }: { instruments: LastActivity[
                           t.direction === "INCOME" ? "text-income-600" : "text-expense-600"
                         }`}
                       >
-                        {t.currency} {t.amount.toFixed(2)}
+                        {money(t.amount, t.currency)}
                       </td>
                       <td className="whitespace-nowrap py-2 text-xs text-gray-500">
                         {formatDateTime(t.createdAt)}

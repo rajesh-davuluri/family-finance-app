@@ -39,6 +39,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export default function InstrumentsPage() {
+  const [showAdd, setShowAdd] = useState(false);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,7 +191,13 @@ export default function InstrumentsPage() {
         Bank accounts, credit cards, and cash your household tracks transactions against.
       </p>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-5">
+      <button
+        onClick={() => setShowAdd((v) => !v)}
+        className="w-full rounded-lg border border-dashed bg-white px-4 py-3 text-left text-sm text-brand-700 sm:hidden"
+      >
+        {showAdd ? "Close" : "+ Add an account or card"}
+      </button>
+      <form onSubmit={handleSubmit} className={`${showAdd ? "grid" : "hidden"} grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid sm:grid-cols-5`}>
         <input
           required
           placeholder="Name (e.g. Chase Checking)"
@@ -253,8 +260,8 @@ export default function InstrumentsPage() {
         onChanged={load}
       />
 
-      <div className="rounded-lg border bg-white">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border bg-white">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b text-left text-gray-500">
               <th className="p-3">Name</th>
@@ -454,8 +461,8 @@ export default function InstrumentsPage() {
           </form>
         )}
 
-        <div className="rounded-lg border bg-white">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border bg-white">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b text-left text-gray-500">
                 <th className="p-3">Date</th>

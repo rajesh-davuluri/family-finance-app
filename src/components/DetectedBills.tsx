@@ -156,8 +156,48 @@ function BillTable({
   stillPaying?: Set<string>;
   onToggle?: (key: string) => void;
 }) {
+  const perPay = (b: RecurringBill) => {
+    const ticked = stillPaying?.has(b.key) ?? false;
+    return b.status === "STOPPED" ? (ticked ? (b.usd * 14) / b.intervalDays : 0) : b.perPaycheckUsd;
+  };
   return (
-    <div className="overflow-x-auto">
+    <>
+    {/* Phone: one card-row per bill, amount and per-paycheck share on the right. */}
+    <ul className="divide-y text-sm md:hidden">
+      {bills.map((b) => {
+        const ticked = stillPaying?.has(b.key) ?? false;
+        const pp = perPay(b);
+        return (
+          <li key={b.key} className={`flex items-start gap-3 py-2.5 ${onToggle && !ticked ? "text-gray-500" : ""}`}>
+            {onToggle && (
+              <input
+                type="checkbox"
+                checked={ticked}
+                onChange={() => onToggle(b.key)}
+                aria-label={`I still pay ${b.label}`}
+                className="mt-1 h-5 w-5 shrink-0"
+              />
+            )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{b.label}</span>
+              <span className="block text-xs text-gray-500">
+                {FREQUENCY_LABELS[b.frequency]} · {onToggle ? "was due" : "next"} {day(b.nextDate)}
+                {b.status === "LATE" && b.nextDate < today && <span className="text-expense-600"> · not recorded yet</span>}
+              </span>
+              <span className="block truncate text-xs text-gray-400">
+                {b.categoryName} · {b.instrumentName} · {b.count} payments
+              </span>
+            </span>
+            <span className="shrink-0 text-right">
+              <span className="block tabular-nums">{amountText(b.amount, b.currency)}</span>
+              {b.previousAmount !== null && <span className="block text-xs text-gray-400">was {amountText(b.previousAmount, b.currency)}</span>}
+              <span className="block text-xs text-gray-500">{pp ? `${usd(pp)} / pay` : "—"}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+    <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
         <thead className="text-left text-xs text-gray-500">
           <tr className="border-b">
@@ -214,5 +254,6 @@ function BillTable({
         </tbody>
       </table>
     </div>
+    </>
   );
 }

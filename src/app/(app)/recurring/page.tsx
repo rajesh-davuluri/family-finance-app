@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import DetectedBills from "@/components/DetectedBills";
+import { money } from "@/lib/money";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; archived: boolean };
@@ -219,7 +220,37 @@ export default function RecurringPage() {
       </form>
 
       <div className="rounded-lg border bg-white">
-        <table className="w-full text-sm">
+        <ul className="divide-y text-sm md:hidden">
+          {templates.map((t) => (
+            <li key={t.id} className={`px-4 py-3 ${t.active ? "" : "opacity-60"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink-900">{t.notes || t.category.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {FREQ_LABELS[t.frequency] ?? t.frequency} · next {formatDate(t.nextRunAt)}
+                  </p>
+                  <p className="truncate text-xs text-gray-400">
+                    {t.category.name} · {t.instrument.name}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-medium tabular-nums">{money(Number(t.amount), t.currency)}</p>
+                  <p className={`text-xs ${t.active ? "text-green-600" : "text-gray-400"}`}>{t.active ? "Active" : "Paused"}</p>
+                </div>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => toggleActive(t.id, t.active)} className="min-h-[36px] rounded-md border px-3 text-xs text-brand-700">
+                  {t.active ? "Pause" : "Resume"}
+                </button>
+                <button onClick={() => handleDelete(t.id)} className="min-h-[36px] rounded-md border px-3 text-xs text-red-600">
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+          {templates.length === 0 && <li className="p-6 text-center text-gray-400">No recurring templates yet.</li>}
+        </ul>
+        <table className="hidden w-full text-sm md:table">
           <thead>
             <tr className="border-b text-left text-gray-500">
               <th className="p-3">Next run</th>
@@ -239,7 +270,7 @@ export default function RecurringPage() {
                 <td className="p-3">{t.category.name}</td>
                 <td className="p-3">{t.instrument.name}</td>
                 <td className="p-3 text-right">
-                  {t.currency} {Number(t.amount).toFixed(2)}
+                  {money(Number(t.amount), t.currency)}
                 </td>
                 <td className="p-3">
                   <span className={t.active ? "text-green-600" : "text-gray-400"}>

@@ -1,5 +1,7 @@
 "use client";
 
+import { money } from "@/lib/money";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatDate } from "@/lib/formatDate";
@@ -30,7 +32,7 @@ type PayCycleData =
 function Money({ value, tone }: { value: number; tone?: "income" | "expense" | "auto" }) {
   const resolvedTone = tone === "auto" ? (value >= 0 ? "income" : "expense") : tone;
   const colorClass = resolvedTone === "income" ? "text-income-600" : resolvedTone === "expense" ? "text-expense-600" : "text-ink-900";
-  return <span className={`font-mono ${colorClass}`}>${value.toFixed(2)}</span>;
+  return <span className={`font-mono ${colorClass}`}>{money(value)}</span>;
 }
 
 export default function PayCycleCard({ refreshKey }: { refreshKey?: number }) {
@@ -70,7 +72,7 @@ export default function PayCycleCard({ refreshKey }: { refreshKey?: number }) {
           </Link>
         </h2>
         <p className="text-xs text-gray-500">
-          Paid {lastPaycheck.currency} {Number(lastPaycheck.amount).toFixed(2)} on {formatDate(lastPaycheck.date)} (
+          Paid {money(Number(lastPaycheck.amount), lastPaycheck.currency)} on {formatDate(lastPaycheck.date)} (
           {lastPaycheck.instrumentName}) · next expected {formatDate(nextPaycheck.date)} (
           {nextPaycheck.daysUntil === 0 ? "today" : `in ${nextPaycheck.daysUntil} day${nextPaycheck.daysUntil === 1 ? "" : "s"}`}
           )
@@ -124,7 +126,7 @@ export default function PayCycleCard({ refreshKey }: { refreshKey?: number }) {
                 <span className="flex items-center gap-3">
                   <span className="text-gray-400">{formatDate(b.nextRunAt)}</span>
                   <span className="font-mono text-expense-600">
-                    {b.currency} {Number(b.amount).toFixed(2)}
+                    {money(Number(b.amount), b.currency)}
                   </span>
                 </span>
               </div>

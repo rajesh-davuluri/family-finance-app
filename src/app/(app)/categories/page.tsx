@@ -198,17 +198,18 @@ function List({
       <ul className="divide-y">
         {items.map((c) => (
           <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-            <span className="min-w-0 flex-1">
+            {/* Phone: the name on its own line, the two choices side by side under it. */}
+            <span className="min-w-0 basis-full font-medium sm:basis-0 sm:flex-1 sm:font-normal">
               {c.name}
               {c.direction === "INCOME" && <span className="ml-1.5 text-xs text-income-600">money in</span>}
             </span>
-            <span className="flex flex-wrap items-center gap-2">
+            <span className="flex w-full items-center gap-2 sm:w-auto sm:flex-wrap">
               <select
                 aria-label={`Group of ${c.name}`}
                 value={c.effectiveGroup}
                 disabled={saving === c.id}
                 onChange={(e) => onGroup(c, e.target.value as CategoryGroup)}
-                className={`max-w-[13rem] rounded-md border px-2 py-1 text-xs ${c.groupGuessed ? "border-dashed text-gray-500" : "text-gray-800"}`}
+                className={`min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs sm:max-w-[13rem] sm:flex-none sm:py-1 ${c.groupGuessed ? "border-dashed text-gray-500" : "text-gray-800"}`}
               >
                 {CATEGORY_GROUPS.map((g) => (
                   <option key={g} value={g}>
@@ -223,7 +224,7 @@ function List({
                 disabled={saving === c.id}
                 onChange={(e) => onKind(c, e.target.value as CategoryKind)}
                 title={KIND_HELP[c.effectiveKind]}
-                className={`rounded-md border px-2 py-1 text-xs ${c.kindGuessed ? "border-dashed text-gray-500" : "text-gray-800"}`}
+                className={`min-w-0 flex-1 rounded-md border px-2 py-1.5 text-xs sm:flex-none sm:py-1 ${c.kindGuessed ? "border-dashed text-gray-500" : "text-gray-800"}`}
               >
                 {KINDS_FOR_DIRECTION[c.direction].map((k) => (
                   <option key={k} value={k}>
@@ -232,7 +233,7 @@ function List({
                   </option>
                 ))}
               </select>
-              <button onClick={() => onDelete(c.id)} className="text-xs text-red-500 hover:underline">
+              <button onClick={() => onDelete(c.id)} className="shrink-0 px-1 py-1.5 text-xs text-red-500 hover:underline" aria-label={`Delete ${c.name}`}>
                 Delete
               </button>
             </span>
