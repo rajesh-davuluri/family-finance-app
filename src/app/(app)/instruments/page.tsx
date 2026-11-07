@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import AccountDetailsPanel from "@/components/AccountDetailsPanel";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
@@ -47,6 +48,8 @@ export default function InstrumentsPage() {
 
   // Which instrument's balance is currently being edited, if any.
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
+  // Which instrument's details (bank, IFSC, account number...) are open.
+  const [detailsId, setDetailsId] = useState<string | null>(null);
   const [balanceForm, setBalanceForm] = useState({ amount: "", date: getTodayLocal() });
 
   // Transfer form -- moves money between two of your own instruments
@@ -264,7 +267,8 @@ export default function InstrumentsPage() {
           </thead>
           <tbody>
             {instruments.map((i) => (
-              <tr key={i.id} className="border-b last:border-0">
+              <Fragment key={i.id}>
+              <tr className="border-b last:border-0">
                 <td className="p-3">
                   {i.name}
                   {i.last4 && <span className="text-gray-400"> ({i.last4})</span>}
@@ -319,7 +323,15 @@ export default function InstrumentsPage() {
                     {i.archived ? "Archived" : "Active"}
                   </span>
                 </td>
-                <td className="space-x-3 p-3 text-right">
+                <td className="space-x-3 whitespace-nowrap p-3 text-right">
+                  {i.type !== "CASH" && (
+                    <button
+                      onClick={() => setDetailsId(detailsId === i.id ? null : i.id)}
+                      className="text-xs text-brand-600 hover:underline"
+                    >
+                      {detailsId === i.id ? "Hide details" : "Details"}
+                    </button>
+                  )}
                   <button onClick={() => toggleArchive(i.id, i.archived)} className="text-xs text-brand-600 hover:underline">
                     {i.archived ? "Unarchive" : "Archive"}
                   </button>
@@ -328,6 +340,14 @@ export default function InstrumentsPage() {
                   </button>
                 </td>
               </tr>
+              {detailsId === i.id && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6}>
+                    <AccountDetailsPanel instrumentId={i.id} currency={i.currency} type={i.type} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {instruments.length === 0 && (
               <tr>

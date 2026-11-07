@@ -41,6 +41,7 @@ model Household {
   notifications Notification[]
   importBatches ImportBatch[]
   telegramLinks TelegramLink[]
+  policies      InsurancePolicy[]
 }
 
 model User {
@@ -103,8 +104,105 @@ model PaymentInstrument {
   transfersIn        Transfer[] @relation("TransferTo")
   goals              SavingsGoal[]
   importBatches      ImportBatch[]
+  details            AccountDetails?
 
   createdAt   DateTime @default(now())
+}
+
+// Reference details for an account (bank, branch, IFSC/routing number,
+// customer ID, where its login is kept). Kept apart from PaymentInstrument
+// so they never ride along when transactions include their instrument.
+// The full account number is stored encrypted (src/lib/encryption.ts) and
+// only sent to the browser when someone clicks "Show". Passwords are not
+// stored anywhere: loginNote says where they are kept (e.g. Bitwarden).
+model AccountDetails {
+  id String @id @default(uuid())
+
+  instrumentId String            @unique
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  bankName               String?
+  branch                 String?
+  routingCode            String? // IFSC (India) or ABA routing number (US)
+  accountNumberEncrypted String? @db.NVarChar(Max)
+  accountNumberLast4     String?
+  accountHolder          String?
+  customerId             String?
+  nominee                String?
+  phone                  String?
+  website                String?
+  loginNote              String? @db.NVarChar(Max)
+  notes                  String? @db.NVarChar(Max)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A life (LIC endowment / money-back), term, health or other insurance
+// policy: its numbers, people, contacts and premium schedule. Paying a
+// premium records an ordinary Transaction and moves nextDueDate on (see
+// src/lib/policies.ts); reminders go out before it is due
+// (/api/cron/policy-reminders).
+model InsurancePolicy {
+  id String @id @default(uuid())
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  kind          String  // LIFE | TERM | HEALTH | VEHICLE | OTHER -- see src/lib/policies.ts
+  status        String  @default("ACTIVE") // ACTIVE | PAID_UP | MATURED | LAPSED | SURRENDERED
+  insurer       String  // e.g. "LIC of India"
+  planName      String? // e.g. "Jeevan Anand (915)"
+  policyNumber  String?
+  insuredPerson String?
+  nominee       String?
+
+  currency       String   @default("INR")
+  sumAssured     Decimal? @db.Decimal(14, 2)
+  maturityAmount Decimal? @db.Decimal(14, 2) // expected payout, if any (LIC endowment); null for term
+
+  premiumAmount    Decimal?  @db.Decimal(12, 2)
+  premiumFrequency String?   // MONTHLY | QUARTERLY | HALF_YEARLY | YEARLY | SINGLE
+  nextDueDate      DateTime?
+  premiumEndDate   DateTime? // last premium (LIC often stops premiums before the policy ends)
+  startDate        DateTime?
+  endDate          DateTime? // maturity date, or when term cover ends
+
+  agentName  String?
+  agentPhone String?
+  helpline   String?
+  website    String?
+  loginNote  String? @db.NVarChar(Max)
+  notes      String? @db.NVarChar(Max)
+  // Anything else, as JSON [{ "label": "Rider", "value": "Accident benefit" }].
+  extraFields String? @db.NVarChar(Max)
+
+  payments  Transaction[]
+  documents PolicyDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([householdId])
+}
+
+// A file kept with a policy: the bond, premium receipts, a nominee form.
+// Stored in the database itself (a few MB at most) so nothing about a
+// policy lives anywhere else.
+model PolicyDocument {
+  id          String @id @default(uuid())
+  policyId    String
+  policy      InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fileName    String @db.NVarChar(255)
+  contentType String
+  size        Int
+  data        Bytes  @db.VarBinary(Max)
+
+  uploadedById String
+
+  createdAt DateTime @default(now())
+
+  @@index([policyId])
 }
 
 model TransactionCategory {
@@ -163,6 +261,11 @@ model Transaction {
   // Set when the transaction came from a CSV import, null when entered by hand.
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // Set when this is a premium paid on an insurance policy, so the policy
+  // shows its own payment history.
+  policyId String?
+  policy   InsurancePolicy? @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
 
