@@ -15,6 +15,8 @@ import {
   daysBetween,
   graceDays,
   summarize,
+  premiumSchedule,
+  maturityReturn,
   type PolicyKind,
   type PolicyStatus,
   type PremiumFrequency,
@@ -236,6 +238,16 @@ export default function PoliciesPage() {
 
   const today = getTodayLocal();
   const { cover, yearly } = useMemo(() => summarize(policies), [policies]);
+  // Premiums still to pay on active policies, from each one's schedule.
+  const stillToPay = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const p of policies) {
+      if (p.status !== "ACTIVE") continue;
+      const sch = premiumSchedule(p, today);
+      if (sch?.leftAmount) out[p.currency] = (out[p.currency] ?? 0) + sch.leftAmount;
+    }
+    return out;
+  }, [policies, today]);
   const upcoming = policies
     .filter((p) => p.status === "ACTIVE" && p.nextDueDate)
     .sort((a, b) => a.nextDueDate!.localeCompare(b.nextDueDate!))[0];
@@ -265,12 +277,15 @@ export default function PoliciesPage() {
       </div>
 
       {policies.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Tile label="Life cover (life + term)">
             {Object.keys(cover).length ? Object.entries(cover).map(([c, n]) => <div key={c}>{money(c, n)}</div>) : "—"}
           </Tile>
           <Tile label="Premiums per year">
             {Object.keys(yearly).length ? Object.entries(yearly).map(([c, n]) => <div key={c}>{money(c, n)}</div>) : "—"}
+          </Tile>
+          <Tile label="Premiums still to pay">
+            {Object.keys(stillToPay).length ? Object.entries(stillToPay).map(([c, n]) => <div key={c}>{money(c, n)}</div>) : "—"}
           </Tile>
           <Tile label="Next premium">
             {upcoming ? (
@@ -449,6 +464,9 @@ function PolicyCard({
   onReload: () => void;
 }) {
   const inactive = p.status !== "ACTIVE" && p.status !== "PAID_UP";
+  const sch = premiumSchedule(p, today);
+  const ret = sch && p.premiumAmount !== null && p.kind === "LIFE" ? maturityReturn(sch, p.maturityAmount, p.endDate, p.premiumAmount) : null;
+  const pct = sch?.total ? Math.round((sch.paid / sch.total) * 100) : null;
   const paidTotal = p.payments.reduce<Record<string, number>>(
     (acc, t) => ({ ...acc, [t.currency]: (acc[t.currency] ?? 0) + t.amount }),
     {},
@@ -479,6 +497,26 @@ function PolicyCard({
               .filter(Boolean)
               .join(" · ")}
           </p>
+          {sch && (
+            <div className="mt-2 max-w-xl">
+              {pct !== null && (
+                <div className="h-1.5 w-full rounded-full bg-gray-100">
+                  <div className="h-1.5 rounded-full bg-brand-500" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+              <p className="mt-1 text-xs text-gray-500">
+                Paid {sch.paid}
+                {sch.total !== null ? ` of ${sch.total}` : ""} premium{(sch.total ?? sch.paid) === 1 ? "" : "s"} ({money(p.currency, sch.paidAmount)})
+                {sch.left !== null &&
+                  (sch.left === 0
+                    ? " · all paid"
+                    : ` · ${sch.left} left (${money(p.currency, sch.leftAmount!)})${sch.lastDue ? `, last on ${formatDate(sch.lastDue)}` : ""}`)}
+              </p>
+            </div>
+          )}
+          {!sch && p.premiumAmount !== null && p.status === "ACTIVE" && (
+            <p className="mt-1 text-xs text-gray-400">Add the start date (Edit) to see how many premiums are paid and left.</p>
+          )}
         </button>
         <div className="flex items-center gap-3">
           {p.status === "ACTIVE" && p.premiumAmount !== null && (
@@ -534,9 +572,20 @@ function PolicyCard({
               }
             />
             <Field label="Next due" value={p.nextDueDate && formatDate(p.nextDueDate)} />
-            <Field label="Last premium" value={p.premiumEndDate && formatDate(p.premiumEndDate)} />
             <Field
-              label="Paid so far"
+              label="Premiums paid"
+              value={sch && `${sch.paid}${sch.total !== null ? ` of ${sch.total}` : ""} · ${money(p.currency, sch.paidAmount)}`}
+            />
+            <Field
+              label="Premiums left"
+              value={sch && sch.left !== null && `${sch.left} · ${money(p.currency, sch.leftAmount ?? 0)}`}
+            />
+            <Field
+              label="Last premium"
+              value={(p.premiumEndDate && formatDate(p.premiumEndDate)) || (sch?.lastDue && formatDate(sch.lastDue))}
+            />
+            <Field
+              label="Recorded in app"
               value={
                 Object.keys(paidTotal).length
                   ? Object.entries(paidTotal)
@@ -546,6 +595,28 @@ function PolicyCard({
               }
             />
           </Section>
+
+          {(ret || (p.kind === "TERM" && sch?.total)) && (
+            <Section title={ret ? "What it earns" : "What the cover costs"}>
+              {ret ? (
+                <>
+                  <Field label="All premiums" value={money(p.currency, ret.totalPremiums)} />
+                  <Field label="Maturity amount" value={money(p.currency, p.maturityAmount!)} />
+                  <Field label={ret.gain >= 0 ? "Gain" : "Loss"} value={money(p.currency, Math.abs(ret.gain))} />
+                  <Field label="Return per year" value={ret.rate !== null ? `${(ret.rate * 100).toFixed(1)}%` : null} />
+                  <p className="py-1 text-xs text-gray-400">
+                    The yearly rate the premiums grow at to reach the maturity amount: compare it with an FD or PPF rate (about 7%) or an index
+                    fund. If this plan pays money-back amounts along the way, the real return is a little higher.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Field label="All premiums" value={money(p.currency, sch!.total! * p.premiumAmount!)} />
+                  <p className="py-1 text-xs text-gray-400">Term cover pays only on a claim: nothing comes back if the policy runs out.</p>
+                </>
+              )}
+            </Section>
+          )}
 
           {(p.extraFields.length > 0 || p.notes) && (
             <Section title="Other details">

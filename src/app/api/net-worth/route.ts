@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { debtToApproxUsd, convertToDebtCurrency } from "@/lib/debtCalculations";
+import { currentFx, holdingInputs, householdAccounts } from "@/lib/investmentData";
+import { analyze, costHeldAt, toUsd } from "@/lib/investments";
 
 function monthLabel(d: Date) {
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
@@ -13,13 +15,23 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
-  const [instruments, debts] = await Promise.all([
+  const [instruments, debts, investmentAccounts, fx] = await Promise.all([
     prisma.paymentInstrument.findMany({ where: { householdId: user.householdId, archived: false } }),
     prisma.debt.findMany({
       where: { householdId: user.householdId, status: "ACTIVE" },
       include: { payments: true },
     }),
+    householdAccounts(user.householdId),
+    currentFx(),
   ]);
+
+  // Investments: today at market value; past months at what had been paid
+  // for what was held then (there are no past prices).
+  const holdings = holdingInputs(investmentAccounts);
+  const today = new Date().toISOString().slice(0, 10);
+  const investmentsUsd = holdings.length ? analyze(holdings, fx, today).totals.valueUsd : 0;
+  const investmentsCostAt = (d: Date) =>
+    holdings.reduce((sum, h) => sum + toUsd(costHeldAt(h.trades, d.toISOString().slice(0, 10)), h.currency, fx), 0);
 
   const trackedInstruments = instruments.filter((i) => i.openingBalance !== null && i.openingBalanceDate !== null);
 
@@ -27,10 +39,11 @@ export async function GET() {
   const currentInstrumentBalances = await Promise.all(
     trackedInstruments.map((i) => computeInstrumentBalance(i.id, Number(i.openingBalance), i.openingBalanceDate!))
   );
-  const assetsUsd = trackedInstruments.reduce(
+  const cashUsd = trackedInstruments.reduce(
     (sum, i, idx) => sum + toApproxUsd(currentInstrumentBalances[idx], i.currency),
     0
   );
+  const assetsUsd = cashUsd + investmentsUsd;
 
   const debtInfo = (d: (typeof debts)[number]) => ({
     currency: d.currency,
@@ -52,7 +65,9 @@ export async function GET() {
     const instrumentBalancesAt = await Promise.all(
       trackedInstruments.map((inst) => computeInstrumentBalance(inst.id, Number(inst.openingBalance), inst.openingBalanceDate!, pointDate))
     );
-    const assetsAt = trackedInstruments.reduce((sum, inst, idx) => sum + toApproxUsd(instrumentBalancesAt[idx], inst.currency), 0);
+    const assetsAt =
+      trackedInstruments.reduce((sum, inst, idx) => sum + toApproxUsd(instrumentBalancesAt[idx], inst.currency), 0) +
+      (i === 0 ? investmentsUsd : investmentsCostAt(pointDate));
 
     const liabilitiesAt = debts.reduce((sum, d) => {
       const paidByThen = d.payments
@@ -72,6 +87,8 @@ export async function GET() {
 
   return NextResponse.json({
     assets: Math.round(assetsUsd * 100) / 100,
+    cash: Math.round(cashUsd * 100) / 100,
+    investments: Math.round(investmentsUsd * 100) / 100,
     liabilities: Math.round(liabilitiesUsd * 100) / 100,
     netWorth: Math.round((assetsUsd - liabilitiesUsd) * 100) / 100,
     untrackedInstrumentCount: instruments.length - trackedInstruments.length,

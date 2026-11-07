@@ -16,6 +16,9 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.savingsGoal.deleteMany({ where: { householdId } }),
     prisma.notification.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
+    prisma.investmentTrade.deleteMany({ where: { holding: { account: { householdId } } } }),
+    prisma.holding.deleteMany({ where: { account: { householdId } } }),
+    prisma.investmentAccount.deleteMany({ where: { householdId } }),
     prisma.policyDocument.deleteMany({ where: { policy: { householdId } } }),
     prisma.insurancePolicy.deleteMany({ where: { householdId } }),
     prisma.accountDetails.deleteMany({ where: { instrument: { householdId } } }),
@@ -90,5 +93,20 @@ export async function deletePolicyCascade(policyId: string) {
     prisma.transaction.updateMany({ where: { policyId }, data: { policyId: null } }),
     prisma.policyDocument.deleteMany({ where: { policyId } }),
     prisma.insurancePolicy.delete({ where: { id: policyId } }),
+  ]);
+}
+
+export async function deleteHoldingCascade(holdingId: string) {
+  await prisma.$transaction([
+    prisma.investmentTrade.deleteMany({ where: { holdingId } }),
+    prisma.holding.delete({ where: { id: holdingId } }),
+  ]);
+}
+
+export async function deleteInvestmentAccountCascade(accountId: string) {
+  await prisma.$transaction([
+    prisma.investmentTrade.deleteMany({ where: { holding: { accountId } } }),
+    prisma.holding.deleteMany({ where: { accountId } }),
+    prisma.investmentAccount.delete({ where: { id: accountId } }),
   ]);
 }
