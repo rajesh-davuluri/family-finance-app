@@ -14,7 +14,7 @@ export async function POST() {
     where: { account: { householdId: user.householdId, archived: false }, exchange: { not: "OTHER" } },
     select: { id: true, symbol: true, exchange: true, currency: true },
   });
-  const { prices, failed, usdInr } = await fetchPrices(holdings);
+  const { prices, failed, usdInr, sources } = await fetchPrices(holdings);
 
   const now = new Date();
   await prisma.$transaction([
@@ -25,5 +25,7 @@ export async function POST() {
       ? [prisma.marketRate.upsert({ where: { pair: "USDINR" }, create: { pair: "USDINR", rate: usdInr }, update: { rate: usdInr } })]
       : []),
   ]);
-  return NextResponse.json({ updated: prices.size, failed, usdInr });
+  // Typed-in holdings (exchange OTHER) aren't looked up: say so rather than stay silent.
+  const typedIn = await prisma.holding.count({ where: { account: { householdId: user.householdId, archived: false }, exchange: "OTHER" } });
+  return NextResponse.json({ updated: prices.size, failed, usdInr, sources, typedIn });
 }
