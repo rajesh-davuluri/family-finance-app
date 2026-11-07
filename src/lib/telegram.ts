@@ -66,7 +66,7 @@ export function webhookSecretUsable() {
 const LINK_CODE_LENGTH = 10;
 
 // A member's link code, shown on Settings and sent to the bot as
-// "/start <code>". Derived rather than stored, like the inbound-email token.
+// "/start <code>". Derived rather than stored.
 export function linkCode(userId: string): string | null {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!secret) return null;
