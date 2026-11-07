@@ -694,3 +694,75 @@ export function crossBorderChecklist(indiaInvestmentsUsd: number, indiaBankUsd: 
     },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Health check: the handful of ratios an analyst looks at first, each rated
+// against common rules of thumb (not rules).
+
+export type HealthStatus = "good" | "watch" | "act";
+export type Health = { key: string; label: string; value: string; status: HealthStatus; note: string };
+
+const rate = (v: number, watch: number, act: number, higherIsWorse = true): HealthStatus =>
+  higherIsWorse ? (v > act ? "act" : v > watch ? "watch" : "good") : v < act ? "act" : v < watch ? "watch" : "good";
+
+export function healthCheck(a: ReturnType<typeof analyze>, today: string): Health[] {
+  const open = a.rows.filter((r) => !r.closed);
+  if (!open.length) return [];
+  const pct = (w: number) => `${Math.round(w * 100)}%`;
+  const out: Health[] = [];
+
+  const singles = open.filter((r) => r.assetType === "STOCK" || r.assetType === "OTHER").sort((x, y) => y.weight - x.weight);
+  if (singles.length) {
+    const top = singles[0];
+    out.push({
+      key: "largest",
+      label: "Largest single stock",
+      value: pct(top.weight),
+      status: rate(top.weight, 0.1, 0.2),
+      note: `${top.name || top.symbol}. Under 10% keeps one company's bad news small.`,
+    });
+  }
+  const top3 = [...open].sort((x, y) => y.weight - x.weight).slice(0, 3);
+  if (open.length > 3) {
+    const w = top3.reduce((s, r) => s + r.weight, 0);
+    out.push({
+      key: "top3",
+      label: "Top 3 holdings",
+      value: pct(w),
+      status: rate(w, 0.4, 0.6),
+      note: top3.map((r) => r.name || r.symbol).join(", "),
+    });
+  }
+  const sector = a.bySector.filter((s) => s.key !== "Not set" && s.key !== "Index / Diversified")[0];
+  if (sector) {
+    out.push({ key: "sector", label: "Largest sector", value: pct(sector.weight), status: rate(sector.weight, 0.25, 0.35), note: sector.label });
+  }
+  const funds = a.byAssetType.filter((s) => s.key === "ETF" || s.key === "MUTUAL_FUND").reduce((s, x) => s + x.weight, 0);
+  out.push({
+    key: "funds",
+    label: "In funds and ETFs",
+    value: pct(funds),
+    status: rate(funds, 0.5, 0.2, false),
+    note: "Index funds spread risk across hundreds of companies at low cost.",
+  });
+  const crypto = a.byAssetType.find((s) => s.key === "CRYPTO")?.weight ?? 0;
+  out.push({ key: "crypto", label: "Crypto", value: pct(crypto), status: rate(crypto, 0.05, 0.1), note: "Above 5-10% a crash hurts the whole portfolio." });
+  const stale = open.filter((r) => r.value === null || !r.priceAt || daysBetween(r.priceAt.slice(0, 10), today) > STALE_DAYS);
+  out.push({
+    key: "prices",
+    label: "Prices up to date",
+    value: `${open.length - stale.length} of ${open.length}`,
+    status: stale.length === 0 ? "good" : stale.length <= 2 ? "watch" : "act",
+    note: stale.length ? `Refresh prices: ${stale.slice(0, 4).map((r) => r.symbol).join(", ")}${stale.length > 4 ? "..." : ""}` : "All refreshed within a week.",
+  });
+  return out;
+}
+
+// Shares that turn long-term within `days` (selling before then is taxed
+// as short-term), soonest first.
+export function turningLongTerm(rows: HoldingRow[], days = 120) {
+  return rows
+    .filter((r) => !r.closed && r.nextLongTerm && r.nextLongTerm.days <= days)
+    .map((r) => ({ id: r.id, symbol: r.symbol, name: r.name, currency: r.currency, country: r.country, ...r.nextLongTerm! }))
+    .sort((x, y) => x.days - y.days);
+}
