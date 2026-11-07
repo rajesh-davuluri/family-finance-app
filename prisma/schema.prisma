@@ -116,6 +116,10 @@ model TransactionCategory {
   // DEBT_PAYMENT | SAVINGS | TRANSFER | LOAN -- see src/lib/categoryKind.ts.
   // Null means "not chosen yet": the kind is guessed from the name.
   kind      String?
+  // Which group it rolls up into in reports: INCOME | HOUSING | UTILITIES |
+  // TRANSPORTATION | FOOD | FAMILY | OBLIGATIONS | LIFESTYLE | SAVINGS |
+  // TRANSFERS | OTHER -- see src/lib/categoryGroups.ts. Null: guessed.
+  group     String? @map("categoryGroup")
 
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)

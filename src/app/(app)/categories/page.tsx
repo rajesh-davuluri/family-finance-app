@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CategoryKind, KIND_HELP, KIND_LABELS, KINDS_FOR_DIRECTION, inferKind } from "@/lib/categoryKind";
+import { CATEGORY_GROUPS, CategoryGroup, GROUP_LABELS } from "@/lib/categoryGroups";
 
 type Direction = "INCOME" | "EXPENSE";
 type Category = {
@@ -12,6 +13,8 @@ type Category = {
   kind: CategoryKind | null;
   effectiveKind: CategoryKind;
   kindGuessed: boolean;
+  effectiveGroup: CategoryGroup;
+  groupGuessed: boolean;
 };
 
 export default function CategoriesPage() {
@@ -55,13 +58,13 @@ export default function CategoriesPage() {
     load();
   }
 
-  async function setKind(c: Category, kind: CategoryKind) {
+  async function update(c: Category, change: { kind?: CategoryKind; group?: CategoryGroup }) {
     setError(null);
     setSaving(c.id);
     const res = await fetch(`/api/categories/${c.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind }),
+      body: JSON.stringify(change),
     });
     setSaving(null);
     if (!res.ok) {
@@ -83,9 +86,10 @@ export default function CategoriesPage() {
 
   if (loading) return <p className="text-sm text-gray-400">Loading...</p>;
 
-  const income = categories.filter((c) => c.direction === "INCOME");
-  const expense = categories.filter((c) => c.direction === "EXPENSE");
-  const guessed = categories.filter((c) => c.kindGuessed).length;
+  const groups = CATEGORY_GROUPS.map((g) => ({ group: g, items: categories.filter((c) => c.effectiveGroup === g) })).filter(
+    (g) => g.items.length > 0
+  );
+  const guessed = categories.filter((c) => c.kindGuessed || c.groupGuessed).length;
   const formKindDefault = form.name ? inferKind(form.name, form.direction) : null;
 
   return (
@@ -94,7 +98,8 @@ export default function CategoriesPage() {
         <h1 className="text-xl font-semibold">Categories</h1>
         <p className="text-sm text-gray-500">
           Each category&rsquo;s <strong>type</strong> decides how its transactions count everywhere — Dashboard, Paychecks
-          and Reports.
+          and Reports — and its <strong>group</strong> is what it adds up to in Reports (Groceries and Dining Out both
+          roll up into Food &amp; Dining).
         </p>
       </div>
 
@@ -137,9 +142,18 @@ export default function CategoriesPage() {
       </form>
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <List title="Money in" items={income} saving={saving} onKind={setKind} onDelete={handleDelete} />
-        <List title="Money out" items={expense} saving={saving} onKind={setKind} onDelete={handleDelete} />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {groups.map((g) => (
+          <List
+            key={g.group}
+            title={GROUP_LABELS[g.group]}
+            items={g.items}
+            saving={saving}
+            onKind={(c, kind) => update(c, { kind })}
+            onGroup={(c, group) => update(c, { group })}
+            onDelete={handleDelete}
+          />
+        ))}
       </div>
 
       <div className="rounded-lg border bg-white p-4 text-sm">
@@ -154,8 +168,8 @@ export default function CategoriesPage() {
         </dl>
         {guessed > 0 && (
           <p className="mt-3 text-xs text-gray-500">
-            {guessed} {guessed === 1 ? "category's type is" : "categories' types are"} guessed from the name (dashed
-            border). Picking a type saves it.
+            {guessed} {guessed === 1 ? "category has" : "categories have"} a type or group guessed from the name (dashed
+            border). Picking one saves it.
           </p>
         )}
       </div>
@@ -168,12 +182,14 @@ function List({
   items,
   saving,
   onKind,
+  onGroup,
   onDelete,
 }: {
   title: string;
   items: Category[];
   saving: string | null;
   onKind: (c: Category, kind: CategoryKind) => void;
+  onGroup: (c: Category, group: CategoryGroup) => void;
   onDelete: (id: string) => void;
 }) {
   return (
@@ -182,8 +198,25 @@ function List({
       <ul className="divide-y">
         {items.map((c) => (
           <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-            <span className="min-w-0 flex-1">{c.name}</span>
-            <span className="flex items-center gap-2">
+            <span className="min-w-0 flex-1">
+              {c.name}
+              {c.direction === "INCOME" && <span className="ml-1.5 text-xs text-income-600">money in</span>}
+            </span>
+            <span className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label={`Group of ${c.name}`}
+                value={c.effectiveGroup}
+                disabled={saving === c.id}
+                onChange={(e) => onGroup(c, e.target.value as CategoryGroup)}
+                className={`max-w-[13rem] rounded-md border px-2 py-1 text-xs ${c.groupGuessed ? "border-dashed text-gray-500" : "text-gray-800"}`}
+              >
+                {CATEGORY_GROUPS.map((g) => (
+                  <option key={g} value={g}>
+                    {GROUP_LABELS[g]}
+                    {c.groupGuessed && g === c.effectiveGroup ? " (guess)" : ""}
+                  </option>
+                ))}
+              </select>
               <select
                 aria-label={`Type of ${c.name}`}
                 value={c.effectiveKind}
