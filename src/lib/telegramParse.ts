@@ -3,7 +3,7 @@ import { parseBankAlert } from "@/lib/bankAlert";
 // Reads a message sent to the Telegram bot into a draft transaction. Two
 // shapes are understood:
 //   - pasted/forwarded bank alerts ("Rs 450 spent on card ending 1234 at
-//     SWIGGY on 31-10-2026") -- via the same reader as Gmail alerts
+//     SWIGGY on 31-10-2026") -- read by src/lib/bankAlert.ts
 //   - quick notes in any order: "450 swiggy hdfc", "groceries 1200 amex
 //     yesterday", "₹99 netflix 30/10"
 // Words matching an account (name or last 4) or a category name pick those;

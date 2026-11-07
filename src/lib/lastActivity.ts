@@ -11,7 +11,8 @@ export type ActivityTransaction = {
   instrumentName: string;
   createdByName: string;
   // How it got into the app -- typed in, imported from a statement (CSV or
-  // PDF), a forwarded/Gmail alert, the Telegram bot, or a recurring template.
+  // PDF), a bank alert email (no longer offered; kept for older entries), the
+  // Telegram bot, or a recurring template.
   source: TransactionSource;
 };
 

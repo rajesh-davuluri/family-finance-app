@@ -1,6 +1,6 @@
-// Reads a bank's card-transaction alert email ("Rs 450.00 spent on your
-// HDFC Bank Credit Card ending 1234 at SWIGGY on 31-10-2026") into the
-// pieces needed to record it. Bank wording varies, so this tries several
+// Reads a bank's card-transaction alert -- pasted into the Telegram bot --
+// ("Rs 450.00 spent on your HDFC Bank Credit Card ending 1234 at SWIGGY on
+// 31-10-2026") into the pieces needed to record it. Bank wording varies, so this tries several
 // common phrasings and returns null when it can't find at least an amount;
 // the caller then tells the household rather than guessing.
 
@@ -107,16 +107,4 @@ export function parseBankAlert(rawText: string): BankAlert | null {
     last4,
     kind: isCredit && !isDebit ? "CREDIT" : "DEBIT",
   };
-}
-
-// Inbound email services give HTML-only bodies for many bank alerts.
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\s*\/?>|<\/(p|div|tr|td|li)>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&#8377;|&#x20b9;/gi, "₹")
-    .replace(/&[a-z]+;/gi, " ");
 }
