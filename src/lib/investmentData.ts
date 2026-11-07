@@ -81,7 +81,8 @@ export async function currentFx(): Promise<Fx & { updatedAt: string | null; live
 }
 
 export const accountInclude = {
-  holdings: { include: { trades: { orderBy: { date: "asc" } } }, orderBy: { symbol: "asc" } },
+  // Date, then time of day (same-day buys must match sales in the order they were made).
+  holdings: { include: { trades: { orderBy: [{ date: "asc" }, { createdAt: "asc" }] } }, orderBy: { symbol: "asc" } },
 } satisfies Prisma.InvestmentAccountInclude;
 
 type AccountRow = Prisma.InvestmentAccountGetPayload<{ include: typeof accountInclude }>;
