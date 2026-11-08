@@ -330,7 +330,7 @@ export default function DashboardPage() {
         {/* On a phone the bottom bar's ＋ does this. */}
         <button
           onClick={() => setShowAddModal(true)}
-          className="hidden rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 sm:block"
+          className="hidden rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 lg:block"
         >
           Add Transaction
         </button>
