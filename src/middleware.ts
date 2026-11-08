@@ -20,5 +20,6 @@ export const config = {
     "/paychecks/:path*",
     "/policies/:path*",
     "/investments/:path*",
+    "/cards/:path*",
   ],
 };
