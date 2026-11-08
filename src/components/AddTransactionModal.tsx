@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { money } from "@/lib/money";
+import { categoryHint, type ReceiptGuess } from "@/lib/receiptParse";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -34,6 +35,13 @@ export type EditableTransaction = {
   notes: string | null;
   categoryId: string;
   instrumentId: string;
+  hasPhoto?: boolean;
+};
+
+const SCAN_STAGE: Record<string, string> = {
+  preparing: "Preparing the photo…",
+  loading: "Getting the reader ready (first time takes a few seconds)…",
+  reading: "Reading the bill…",
 };
 
 export default function AddTransactionModal({
@@ -71,6 +79,118 @@ export default function AddTransactionModal({
 
   const isEditing = !!editingTransaction;
 
+  // The bill photo: a new one to upload on save (with a preview), or the one
+  // already stored for the transaction being edited.
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [photo, setPhoto] = useState<Blob | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [hasStoredPhoto, setHasStoredPhoto] = useState(false);
+  const [removeStoredPhoto, setRemoveStoredPhoto] = useState(false);
+  const [scan, setScan] = useState<{ stage: string; fraction: number } | null>(null);
+  const [scanNote, setScanNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function setNewPhoto(b: Blob | null) {
+    setPhoto(b);
+    setPhotoUrl((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return b ? URL.createObjectURL(b) : null;
+    });
+  }
+
+  // Take or choose a photo. A new transaction is filled in from what's read;
+  // when editing, the photo is only attached.
+  async function onPhotoPicked(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setScanNote(null);
+    if (isEditing) {
+      try {
+        const { shrinkPhoto } = await import("@/lib/billScan");
+        setNewPhoto(await shrinkPhoto(file));
+        setRemoveStoredPhoto(false);
+      } catch {
+        setError("Couldn't open that photo.");
+      }
+      return;
+    }
+    try {
+      const { scanBill } = await import("@/lib/billScan");
+      setScan({ stage: "preparing", fraction: 0 });
+      const result = await scanBill(file, getTodayLocal(), (stage, fraction) => setScan({ stage, fraction }));
+      setNewPhoto(result.photo);
+      await applyGuess(result.guess, result.text);
+    } catch (e) {
+      // Keep the photo even when it can't be read.
+      try {
+        const { shrinkPhoto } = await import("@/lib/billScan");
+        setNewPhoto(await shrinkPhoto(file));
+      } catch {
+        /* the photo itself couldn't be opened */
+      }
+      setScanNote({ ok: false, text: `Couldn't read the bill${e instanceof Error && e.message ? ` (${e.message})` : ""}. Type the details in — the photo will still be saved.` });
+    } finally {
+      setScan(null);
+    }
+  }
+
+  async function applyGuess(g: ReceiptGuess, text: string) {
+    const next = { ...form };
+    if (g.amount != null) next.amount = g.amount.toFixed(2);
+    if (g.date) next.date = g.date;
+    if (g.merchant && !next.notes) next.notes = g.merchant;
+    // Rupees on the bill: pay from a rupee account if there is one.
+    if (g.currency && g.currency !== next.currency) {
+      const inCurrency = instruments.find((i) => !i.archived && i.currency === g.currency);
+      next.currency = g.currency;
+      if (inCurrency) next.instrumentId = inCurrency.id;
+    }
+    // The category used for this store before; failing that, one whose name
+    // fits what the bill is for (groceries, dining, fuel...).
+    let fromHistory = false;
+    if (g.merchant) {
+      try {
+        const res = await fetch("/api/transactions/bulk/suggest-categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ descriptions: [g.merchant] }),
+        });
+        const id = res.ok ? (await res.json()).suggestions?.[0]?.categoryId : null;
+        if (id && categories.some((c) => c.id === id)) {
+          next.categoryId = id;
+          fromHistory = true;
+        }
+      } catch {
+        /* keep the current category */
+      }
+    }
+    if (!fromHistory) {
+      const expense = categories.filter((c) => c.direction === "EXPENSE");
+      const byName = (categoryHint(text) ?? []).map((re) => expense.find((c) => re.test(c.name))).find(Boolean);
+      if (byName) next.categoryId = byName.id;
+    }
+    setForm(next);
+    const found = [g.merchant, g.amount != null ? money(g.amount, next.currency) : null, g.date ? formatDate(g.date, { month: "short", day: "numeric" }) : null].filter(Boolean);
+    setScanNote(
+      g.amount == null
+        ? { ok: false, text: `Couldn't find the total${found.length ? ` (read: ${found.join(" · ")})` : ""} — type the amount in.` }
+        : { ok: true, text: `Read from the bill: ${found.join(" · ")}. Check it before saving.` },
+    );
+  }
+
+  async function savePhoto(transactionId: string): Promise<string | null> {
+    try {
+      if (photo) {
+        const res = await fetch(`/api/transactions/${transactionId}/attachment`, { method: "PUT", headers: { "Content-Type": photo.type || "image/jpeg" }, body: photo });
+        if (!res.ok) return (await res.json().catch(() => null))?.error ?? "the photo didn't upload";
+      } else if (removeStoredPhoto) {
+        await fetch(`/api/transactions/${transactionId}/attachment`, { method: "DELETE" });
+      }
+      return null;
+    } catch {
+      return "the photo didn't upload (no connection)";
+    }
+  }
+
   // Load fresh options each time the modal opens, in case a category or
   // instrument was added/archived since the last time it was open. Prefills
   // from editingTransaction when editing, otherwise defaults to sensible
@@ -80,6 +200,11 @@ export default function AddTransactionModal({
     setError(null);
     setDuplicate(null);
     setLoading(true);
+    setNewPhoto(null);
+    setScan(null);
+    setScanNote(null);
+    setRemoveStoredPhoto(false);
+    setHasStoredPhoto(!!editingTransaction?.hasPhoto);
     Promise.all([fetch("/api/categories"), fetch("/api/instruments")]).then(async ([catRes, instRes]) => {
       const cats = await catRes.json();
       const insts = await instRes.json();
@@ -138,7 +263,12 @@ export default function AddTransactionModal({
       );
       return;
     }
+    const saved = await res.json().catch(() => null);
+    const photoError = saved?.id ? await savePhoto(saved.id) : null;
+    if (photoError) window.alert(`The transaction was saved, but ${photoError}. Open it and attach the photo again.`);
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setNewPhoto(null);
+    setScanNote(null);
     setDuplicate(null);
     onSuccess();
   }
@@ -172,6 +302,87 @@ export default function AddTransactionModal({
                 on the Categories / Instruments pages first.
               </div>
             )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                onPhotoPicked(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {!noSetupYet && (
+              <div className="mb-3 space-y-2">
+                {!isEditing && !photoUrl && !scan && (
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-brand-400 bg-brand-50 px-4 py-3 text-sm font-medium text-brand-700 active:bg-brand-100"
+                  >
+                    <span aria-hidden>📷</span> Scan a bill or receipt
+                  </button>
+                )}
+                {scan && (
+                  <div className="rounded-md bg-gray-50 p-3 text-sm text-gray-600" role="status">
+                    <p>{SCAN_STAGE[scan.stage]}</p>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200">
+                      <div
+                        className={`h-full rounded-full bg-brand-500 transition-all ${scan.stage === "loading" ? "w-1/3 animate-pulse" : ""}`}
+                        style={scan.stage === "reading" ? { width: `${Math.max(8, Math.round(scan.fraction * 100))}%` } : undefined}
+                      />
+                    </div>
+                  </div>
+                )}
+                {(photoUrl || (hasStoredPhoto && !removeStoredPhoto)) && (
+                  <div className="flex items-start gap-3 rounded-md border p-2">
+                    <a
+                      href={photoUrl ?? `/api/transactions/${editingTransaction?.id}/attachment`}
+                      target="_blank"
+                      rel="noopener"
+                      className="shrink-0"
+                      title="Open the photo"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photoUrl ?? `/api/transactions/${editingTransaction?.id}/attachment`}
+                        alt="Bill photo"
+                        className="h-16 w-16 rounded object-cover"
+                      />
+                    </a>
+                    <div className="min-w-0 flex-1 text-sm">
+                      {scanNote ? (
+                        <p className={scanNote.ok ? "text-gray-700" : "text-amber-800"}>{scanNote.text}</p>
+                      ) : (
+                        <p className="text-gray-600">{photoUrl ? "New photo — saved with the transaction." : "Bill photo"}</p>
+                      )}
+                      <div className="mt-1 flex gap-3 text-xs">
+                        <button type="button" onClick={() => fileRef.current?.click()} className="text-brand-700 underline">
+                          {isEditing ? "Replace" : "Scan another"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewPhoto(null);
+                            setScanNote(null);
+                            if (hasStoredPhoto) setRemoveStoredPhoto(true);
+                          }}
+                          className="text-red-600 underline"
+                        >
+                          Remove photo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {!photoUrl && scanNote && !scanNote.ok && <p className="text-sm text-amber-800">{scanNote.text}</p>}
+                {isEditing && !photoUrl && (!hasStoredPhoto || removeStoredPhoto) && (
+                  <button type="button" onClick={() => fileRef.current?.click()} className="text-sm text-brand-700 underline">
+                    📷 Attach a bill photo
+                  </button>
+                )}
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
                 type="number"
@@ -179,7 +390,8 @@ export default function AddTransactionModal({
                 step="0.01"
                 min="0.01"
                 required
-                autoFocus={!isEditing}
+                // Straight to the amount with a keyboard; on a touch screen the keyboard would cover the Scan button.
+                autoFocus={!isEditing && typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches}
                 placeholder="Amount"
                 aria-label="Amount"
                 value={form.amount}
@@ -291,7 +503,7 @@ export default function AddTransactionModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || noSetupYet}
+                  disabled={submitting || noSetupYet || !!scan}
                   className="flex-1 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:flex-none sm:py-2"
                 >
                   {submitting ? "Saving..." : isEditing ? "Save Changes" : "Add Transaction"}

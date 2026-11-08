@@ -275,6 +275,9 @@ model Transaction {
   policyId String?
   policy   InsurancePolicy? @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // A photo of the bill or receipt, taken with the phone.
+  attachment TransactionAttachment?
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])
@@ -595,4 +598,18 @@ model CardStatement {
   createdAt DateTime @default(now())
 
   @@unique([instrumentId, closingDate])
+}
+
+// The photo of a bill or receipt behind a transaction (one per transaction).
+// Stored downscaled as JPEG, a few hundred KB. Deleted with its transaction:
+// this is the only path into the table, so a cascade is safe on SQL Server.
+model TransactionAttachment {
+  id            String      @id @default(uuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  contentType   String
+  size          Int
+  data          Bytes       @db.VarBinary(Max)
+
+  createdAt DateTime @default(now())
 }
