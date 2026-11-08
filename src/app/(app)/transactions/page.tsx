@@ -246,7 +246,7 @@ export default function TransactionsPage() {
       )}
 
       {/* On a phone the bottom bar's ＋ adds a transaction; this inline form is for wider screens. */}
-      <form onSubmit={handleSubmit} className="hidden grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid sm:grid-cols-6">
+      <form onSubmit={handleSubmit} className="hidden grid-cols-1 gap-3 rounded-lg border bg-white p-4 lg:grid lg:grid-cols-6">
         <input
           type="number"
           step="0.01"
@@ -465,7 +465,7 @@ export default function TransactionsPage() {
         ) : (
           <>
           {/* Phone: grouped by day, one line per transaction; tap to edit or delete. */}
-          <ul className="md:hidden">
+          <ul className="lg:hidden">
             {shown.map((t, i) => {
               const day = t.date.slice(0, 10);
               const newDay = i === 0 || shown[i - 1].date.slice(0, 10) !== day;
@@ -496,7 +496,7 @@ export default function TransactionsPage() {
               </li>
             )}
           </ul>
-          <table className="hidden w-full text-sm md:table">
+          <table className="hidden w-full text-sm lg:table">
             <thead>
               <tr className="border-b text-left text-gray-500">
                 <th className="p-3">Date</th>

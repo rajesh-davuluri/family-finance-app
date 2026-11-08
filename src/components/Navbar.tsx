@@ -165,7 +165,7 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="sticky top-0 z-30 bg-ink-900 pt-[env(safe-area-inset-top)] print:hidden sm:static">
+      <nav className="sticky top-0 z-30 bg-ink-900 pt-[env(safe-area-inset-top)] print:hidden lg:static">
         <div className="mx-auto flex max-w-6xl items-center px-4 py-3">
           {/* Clicking the name reloads the current page (fresh data everywhere on it). */}
           <a
@@ -180,7 +180,7 @@ export default function Navbar() {
             Family Finance
           </a>
 
-          <div className="hidden flex-1 items-center gap-5 sm:flex">
+          <div className="hidden flex-1 items-center gap-5 lg:flex">
             {primaryLinks.map((link) => (
               <NavLink key={link.href} href={link.href} label={link.label} active={!!pathname?.startsWith(link.href)} />
             ))}
@@ -218,7 +218,7 @@ export default function Navbar() {
             <NotificationBell />
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
-              className="hidden whitespace-nowrap text-sm text-ink-300 hover:text-white sm:block"
+              className="hidden whitespace-nowrap text-sm text-ink-300 hover:text-white lg:block"
             >
               Sign out
             </button>
@@ -229,7 +229,7 @@ export default function Navbar() {
       {/* Phone: bottom tab bar, within thumb reach, clear of the home indicator. */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-800 bg-ink-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur print:hidden sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-800 bg-ink-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur print:hidden lg:hidden"
       >
         <div className="mx-auto grid max-w-md grid-cols-5 items-end px-2 pt-1.5">
           <TabLink href="/dashboard" label="Home" icon="home" active={tabActive("/dashboard")} />
@@ -256,14 +256,14 @@ export default function Navbar() {
       </nav>
 
       {sheetOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-paper sm:hidden" role="dialog" aria-modal="true" aria-label="All pages">
+        <div className="fixed inset-0 z-50 flex flex-col bg-paper lg:hidden" role="dialog" aria-modal="true" aria-label="All pages">
           <div className="flex items-center justify-between bg-ink-900 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]">
             <span className="font-display text-lg italic text-brand-300">All pages</span>
             <button onClick={() => setSheetOpen(false)} className="flex h-11 w-11 items-center justify-center text-2xl text-ink-300" aria-label="Close">
               ×
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4">
+          <div className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4">
             {sheetGroups.map((g) => (
               <section key={g.title} className="mb-5">
                 <h2 className="mb-1.5 px-1 font-sans text-xs font-semibold uppercase tracking-wide text-gray-500">{g.title}</h2>

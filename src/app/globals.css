@@ -25,9 +25,9 @@ h3 {
   }
 }
 
-/* Phones. iOS Safari zooms the page into any field with text under 16px
-   when it's tapped -- so form fields are 16px on small screens. */
-@media (max-width: 639px) {
+/* Phones and iPads. iOS Safari zooms the page into any field with text under
+   16px when it's tapped -- so form fields are 16px on small and touch screens. */
+@media (max-width: 1023px), (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]),
   select,
   textarea {
