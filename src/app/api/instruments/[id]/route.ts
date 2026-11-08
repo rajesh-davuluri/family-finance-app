@@ -10,6 +10,8 @@ const updateSchema = z.object({
   openingBalance: z.number().nullable().optional(),
   openingBalanceDate: z.string().nullable().optional(),
   creditLimit: z.number().positive().nullable().optional(),
+  statementDay: z.number().int().min(1).max(31).nullable().optional(),
+  dueDay: z.number().int().min(1).max(31).nullable().optional(),
 });
 
 async function assertOwnership(instrumentId: string, householdId: string) {
@@ -31,6 +33,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { openingBalanceDate, ...rest } = parsed.data;
   if (rest.creditLimit !== undefined && rest.creditLimit !== null && existing.type !== "CREDIT_CARD") {
     return NextResponse.json({ error: "Only credit cards have a credit limit." }, { status: 400 });
+  }
+  if ((rest.statementDay != null || rest.dueDay != null) && existing.type !== "CREDIT_CARD") {
+    return NextResponse.json({ error: "Only credit cards have statement and due days." }, { status: 400 });
   }
 
   const updated = await prisma.paymentInstrument.update({

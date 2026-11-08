@@ -23,6 +23,7 @@ const primaryLinks = [
 ];
 
 const moreLinks = [
+  { href: "/cards", label: "Credit cards" },
   { href: "/reports", label: "Reports" },
   { href: "/investments", label: "Investments" },
   { href: "/policies", label: "Policies" },
@@ -39,6 +40,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
   {
     title: "Money this month",
     links: [
+      { href: "/cards", label: "Credit cards", hint: "Statements, due dates, owed now" },
       { href: "/budgets", label: "Budgets", hint: "Limits by category" },
       { href: "/recurring", label: "Recurring bills", hint: "Rent, EMIs, subscriptions" },
       { href: "/debts", label: "Debts", hint: "Loans and what's left" },

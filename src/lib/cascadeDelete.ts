@@ -22,6 +22,7 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.policyDocument.deleteMany({ where: { policy: { householdId } } }),
     prisma.insurancePolicy.deleteMany({ where: { householdId } }),
     prisma.accountDetails.deleteMany({ where: { instrument: { householdId } } }),
+    prisma.cardStatement.deleteMany({ where: { instrument: { householdId } } }),
     prisma.importBatch.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
@@ -55,6 +56,7 @@ export async function deleteInstrumentCascade(instrumentId: string) {
     // Import records whose transactions were all deleted since.
     prisma.importBatch.deleteMany({ where: { instrumentId } }),
     prisma.accountDetails.deleteMany({ where: { instrumentId } }),
+    prisma.cardStatement.deleteMany({ where: { instrumentId } }),
     prisma.paymentInstrument.delete({ where: { id: instrumentId } }),
   ]);
 }
