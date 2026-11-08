@@ -24,6 +24,7 @@ type Transaction = {
   recurringTemplateId?: string | null;
   importBatchId?: string | null;
   importBatch?: { fileName: string } | null;
+  attachment?: { id: string } | null;
 };
 
 const EMPTY_SEARCH = { from: "", to: "", instrumentId: "", categoryId: "" };
@@ -181,6 +182,7 @@ export default function TransactionsPage() {
       notes: t.notes,
       categoryId: t.category.id,
       instrumentId: t.instrument.id,
+      hasPhoto: !!t.attachment,
     });
   }
 
@@ -475,7 +477,10 @@ export default function TransactionsPage() {
                   {newDay && <p className="sticky top-[calc(3.25rem+env(safe-area-inset-top))] z-10 border-b bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-500">{dayLabel(t.date)}</p>}
                   <button onClick={() => edit(t)} className="flex w-full items-center gap-3 border-b px-3 py-2.5 text-left active:bg-gray-50">
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] text-ink-900">{t.notes || t.category.name}</span>
+                      <span className="block truncate text-[15px] text-ink-900">
+                        {t.attachment && <span aria-label="Bill photo attached" title="Bill photo attached">📎 </span>}
+                        {t.notes || t.category.name}
+                      </span>
                       <span className="block truncate text-xs text-gray-500">
                         {t.notes ? `${t.category.name} · ` : ""}
                         {t.instrument.name}
@@ -514,7 +519,14 @@ export default function TransactionsPage() {
                   <td className="p-3">{formatDate(t.date)}</td>
                   <td className="p-3">{t.category.name}</td>
                   <td className="p-3">{t.instrument.name}</td>
-                  <td className="p-3 text-gray-500">{t.notes || "—"}</td>
+                  <td className="p-3 text-gray-500">
+                    {t.attachment && (
+                      <a href={`/api/transactions/${t.id}/attachment`} target="_blank" rel="noopener" title="View the bill photo" className="mr-1">
+                        📎
+                      </a>
+                    )}
+                    {t.notes || "—"}
+                  </td>
                   <td className="p-3 text-gray-500">
                     {t.createdBy?.name ?? "—"}
                     {sourceOf(t) !== "MANUAL" && (

@@ -6,3 +6,6 @@ node_modules/
 .DS_Store
 *.tsbuildinfo
 family_finance_info.txt
+
+# Text-recognition files copied from node_modules (scripts/copy-ocr-assets.mjs)
+/public/ocr

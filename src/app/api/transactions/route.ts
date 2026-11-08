@@ -42,6 +42,7 @@ export async function GET(req: Request) {
       instrument: true,
       createdBy: { select: { name: true } },
       importBatch: { select: { fileName: true } },
+      attachment: { select: { id: true } },
     },
     orderBy: { date: "desc" },
     take: limit,
