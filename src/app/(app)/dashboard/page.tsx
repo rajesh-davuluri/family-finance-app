@@ -9,6 +9,7 @@ import AddTransactionModal from "@/components/AddTransactionModal";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import SpendingByMonth from "@/components/SpendingByMonth";
 import PayCycleCard from "@/components/PayCycleCard";
+import MoneyTiles from "@/components/MoneyTiles";
 import { formatDate } from "@/lib/formatDate";
 import { LastActivity, SOURCE_LABELS, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
@@ -334,6 +335,8 @@ export default function DashboardPage() {
           Add Transaction
         </button>
       </div>
+
+      <MoneyTiles />
 
       <PayCycleCard refreshKey={payCycleRefresh} />
 
