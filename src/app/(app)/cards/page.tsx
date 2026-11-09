@@ -7,6 +7,7 @@ import { money } from "@/lib/money";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot, RecordedStatement } from "@/lib/cards";
 import MarkCardPaid from "@/components/MarkCardPaid";
+import CardUsage from "@/components/CardUsage";
 
 // Each credit card as a statement: what the last statement asked for, what's
 // been paid, what's left before the due date, and what's been charged since.
@@ -149,6 +150,8 @@ export default function CardsPage() {
           <CardPanel key={c.id} card={c} today={today} onChanged={load} />
         ))}
       </div>
+
+      <CardUsage />
 
       <p className="text-xs text-gray-400">
         Payments count once even when both your bank statement and the card statement were imported. Amounts are in each card&apos;s own
