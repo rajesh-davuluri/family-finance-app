@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { Currency } from "@/lib/enums";
-import { describeExisting, findExistingDuplicate } from "@/lib/duplicateData";
+import { describeExisting, findExistingDuplicate, rememberNotDuplicates } from "@/lib/duplicateData";
 import { notifyHousehold } from "@/lib/notify";
 import { inferGroup } from "@/lib/categoryGroups";
 import { NEW_PREFIX } from "@/lib/receiptItems";
@@ -25,6 +25,7 @@ const schema = z.object({
   parts: z.array(z.object({ categoryId: z.string().min(1), amount: z.number().positive() })).min(1).max(12),
   items: z.array(z.object({ key: z.string().min(1).max(100), categoryId: z.string().min(1) })).max(300).optional(),
   allowDuplicate: z.boolean().optional(),
+  notDuplicateOf: z.string().max(64).optional(),
 });
 
 const cents = (n: number) => Math.round(n * 100);
@@ -156,6 +157,9 @@ export async function POST(req: Request) {
       ),
     ).then((rows) => rows.map((r) => r.id));
   }
+
+  // Added anyway after the duplicate warning: every part is fine against it.
+  if (data.notDuplicateOf) await rememberNotDuplicates(householdId, ids.map((id) => [id, data.notDuplicateOf!] as [string, string]));
 
   // Remember each item's category for the next bill.
   const learned = new Map<string, string>();

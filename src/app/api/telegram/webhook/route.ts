@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { findExistingDuplicate } from "@/lib/duplicateData";
+import { findExistingDuplicate, rememberNotDuplicates } from "@/lib/duplicateData";
 import { InlineButton, editMessage, sendMessage, telegramApi, userForLinkCode, webhookSecretValid } from "@/lib/telegram";
 import { MAX_ENTRIES_PER_MESSAGE, ParseAccount, ParseCategory, parseQuickEntry, splitEntries } from "@/lib/telegramParse";
 import { suggestCategories } from "@/lib/categorize";
@@ -355,11 +355,23 @@ type Lists = Awaited<ReturnType<typeof listsFor>>;
 
 // Records a complete draft as a transaction. Returns what was added, or null
 // if it's incomplete or was already handled.
-async function commit(p: Pending, { accounts, categories }: Lists) {
+// `afterWarning`: added from the one-draft summary, which shows any
+// "looks already recorded" warning -- adding anyway settles that pair.
+async function commit(p: Pending, { accounts, categories }: Lists, afterWarning = false) {
   const account = accounts.find((a) => a.id === p.instrumentId);
   const category = categories.find((c) => c.id === p.categoryId);
   if (!account || !category) return null;
   const currency = p.currency || account.currency;
+  const warned = afterWarning
+    ? await findExistingDuplicate(p.householdId, {
+        date: p.date.toISOString().slice(0, 10),
+        amount: Number(p.amount),
+        currency,
+        instrumentId: account.id,
+        notes: p.notes,
+        source: "TELEGRAM",
+      })
+    : null;
 
   // Removing the draft and adding the transaction happen together: a
   // double-tap finds the draft already gone and adds nothing, and a failed
@@ -367,7 +379,8 @@ async function commit(p: Pending, { accounts, categories }: Lists) {
   const added = await prisma.$transaction(async (tx) => {
     const removed = await tx.pendingTelegramTransaction.deleteMany({ where: { id: p.id } });
     if (removed.count === 0) return false;
-    await tx.transaction.create({
+    const created = await tx.transaction.create({
+      select: { id: true },
       data: {
         source: "TELEGRAM",
         amount: p.amount,
@@ -380,14 +393,15 @@ async function commit(p: Pending, { accounts, categories }: Lists) {
         createdById: p.userId,
       },
     });
-    return true;
+    return created.id;
   });
   if (!added) return null;
+  if (warned) await rememberNotDuplicates(p.householdId, [[added, warned.existing.id]]);
   return { account, category, amount: `${currency} ${Number(p.amount).toFixed(2)}` };
 }
 
 async function add(p: Pending, chatId: string, messageId: number, lists: Lists) {
-  const done = await commit(p, lists);
+  const done = await commit(p, lists, true);
   if (!done) {
     const view = await summary(p.id);
     if (view) await editMessage(chatId, messageId, view.text, view.buttons);

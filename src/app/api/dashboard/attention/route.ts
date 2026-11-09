@@ -5,7 +5,7 @@ import { calendarDateInZone } from "@/lib/appTimezone";
 import { toApproxUsd } from "@/lib/fx";
 import { loadCards } from "@/lib/cardData";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
-import { loadForDuplicateCheck } from "@/lib/duplicateData";
+import { loadForDuplicateCheck, pairKey, settledPairs } from "@/lib/duplicateData";
 import { findPairs } from "@/lib/duplicates";
 import { attentionItems } from "@/lib/attention";
 
@@ -23,7 +23,7 @@ export async function GET() {
   const todayMs = Date.parse(`${today}T00:00:00Z`);
   const monthStart = new Date(`${today.slice(0, 8)}01T00:00:00Z`);
 
-  const [cards, instruments, budgets, monthTxns, latest, dupTxns] = await Promise.all([
+  const [cards, instruments, budgets, monthTxns, latest, dupTxns, settled] = await Promise.all([
     loadCards(householdId, today),
     prisma.paymentInstrument.findMany({ where: { householdId, archived: false } }),
     prisma.budget.findMany({ where: { householdId }, include: { category: true } }),
@@ -33,6 +33,7 @@ export async function GET() {
     }),
     prisma.transaction.groupBy({ by: ["instrumentId"], where: { householdId }, _max: { date: true } }),
     loadForDuplicateCheck(householdId, new Date(todayMs - 180 * DAY).toISOString().slice(0, 10), today),
+    settledPairs(householdId),
   ]);
 
   // Bank money (USD accounts with a balance set) against USD card bills.
@@ -50,7 +51,9 @@ export async function GET() {
   for (const t of monthTxns) spent.set(t.categoryId, (spent.get(t.categoryId) ?? 0) + toApproxUsd(Number(t.amount), t.currency));
 
   const split = new Map(dupTxns.map((t) => [t.id, !!t.splitGroupId]));
-  const likelyDuplicates = findPairs(dupTxns).filter((p) => p.confidence === "HIGH" && !(split.get(p.keep) && split.get(p.remove))).length;
+  const likelyDuplicates = findPairs(dupTxns, (a, b) => settled.has(pairKey(a, b))).filter(
+    (p) => p.confidence === "HIGH" && !(split.get(p.keep) && split.get(p.remove)) && !settled.has(pairKey(p.keep, p.remove)),
+  ).length;
 
   const lastBy = new Map(latest.map((l) => [l.instrumentId, l._max.date]));
   const stale = instruments

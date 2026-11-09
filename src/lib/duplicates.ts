@@ -114,7 +114,9 @@ export type DupPair = { keep: string; remove: string; confidence: Confidence; da
 // Likely duplicates among transactions already saved. In each pair the one
 // to remove is the hand-typed copy when the other came from the statement
 // (statement rows are the record of what was charged), else the later-added.
-export function findPairs(txns: (DupTxn & { createdAt: string })[]): DupPair[] {
+// `skip` leaves out pairs already settled as not duplicates, so another
+// real copy of the same transaction can still be found.
+export function findPairs(txns: (DupTxn & { createdAt: string })[], skip?: (a: string, b: string) => boolean): DupPair[] {
   const sorted = [...txns].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
   const pairs: DupPair[] = [];
   const used = new Set<string>();
@@ -124,7 +126,7 @@ export function findPairs(txns: (DupTxn & { createdAt: string })[]): DupPair[] {
     let best: { b: (typeof sorted)[number]; m: DupMatch } | null = null;
     for (let j = i + 1; j < sorted.length && daysApart(a.date, sorted[j].date) <= DUPLICATE_WINDOW_DAYS; j++) {
       const b = sorted[j];
-      if (used.has(b.id)) continue;
+      if (used.has(b.id) || skip?.(a.id, b.id)) continue;
       const m = compare(a, b);
       if (m && (!best || rank(m) < rank(best.m))) best = { b, m };
     }
