@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/formatDate";
 import { money } from "@/lib/money";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot, RecordedStatement } from "@/lib/cards";
+import MarkCardPaid from "@/components/MarkCardPaid";
 
 // Each credit card as a statement: what the last statement asked for, what's
 // been paid, what's left before the due date, and what's been charged since.
@@ -160,6 +161,7 @@ export default function CardsPage() {
 function CardPanel({ card, today, onChanged }: { card: Card; today: string; onChanged: () => void }) {
   const s = card.snapshot;
   const [open, setOpen] = useState<null | "activity" | "history" | "statement" | "settings">(null);
+  const [paying, setPaying] = useState(false);
   const toggle = (k: NonNullable<typeof open>) => setOpen((v) => (v === k ? null : k));
   const util = s.utilization;
 
@@ -208,7 +210,7 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
           </div>
           {open === "settings" && <DaysForm card={card} onSaved={onChanged} />}
           {open === "statement" && <StatementForm card={card} today={today} onSaved={onChanged} />}
-          {open === "activity" && <ActivityList card={card} />}
+          {open === "activity" && <ActivityList card={card} onChanged={onChanged} />}
         </div>
       ) : (
         <>
@@ -295,6 +297,14 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
               {s.status === "DUE" && (
                 <p className="mt-2 text-xs text-gray-500">Pay the full {money(s.leftOnStatement, card.currency)} by the due date to avoid interest.</p>
               )}
+              {(s.status === "DUE" || s.status === "OVERDUE") && (
+                <button
+                  onClick={() => setPaying(true)}
+                  className="mt-3 w-full rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white active:bg-brand-700"
+                >
+                  Mark as paid
+                </button>
+              )}
             </div>
           </div>
 
@@ -318,7 +328,7 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
           </div>
           {open && (
             <div className="border-t p-4">
-              {open === "activity" && <ActivityList card={card} />}
+              {open === "activity" && <ActivityList card={card} onChanged={onChanged} />}
               {open === "history" && <History card={card} onChanged={onChanged} />}
               {open === "statement" && <StatementForm card={card} today={today} onSaved={onChanged} />}
               {open === "settings" && <DaysForm card={card} onSaved={onChanged} />}
@@ -331,11 +341,26 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
           )}
         </>
       )}
+      {paying && (
+        <MarkCardPaid
+          card={card}
+          onClose={() => setPaying(false)}
+          onDone={() => {
+            setPaying(false);
+            onChanged();
+          }}
+        />
+      )}
     </article>
   );
 }
 
-function ActivityList({ card }: { card: Card }) {
+function ActivityList({ card, onChanged }: { card: Card; onChanged?: () => void }) {
+  async function undo(transferId: string) {
+    if (!confirm("Remove this payment? The bill will show as unpaid again.")) return;
+    await fetch(`/api/transfers/${transferId}`, { method: "DELETE" });
+    onChanged?.();
+  }
   const rows = card.snapshot.recent;
   if (!rows.length) return <p className="text-sm text-gray-400">Nothing since the statement closed.</p>;
   return (
@@ -346,6 +371,14 @@ function ActivityList({ card }: { card: Card }) {
             <span className="block truncate">{a.label}</span>
             <span className="block text-xs text-gray-500">
               {short(a.date)} · {a.kind === "CHARGE" ? "charge" : a.kind === "PAYMENT" ? "payment" : "refund / credit"}
+              {a.transferId && onChanged && (
+                <>
+                  {" · "}
+                  <button onClick={() => undo(a.transferId!)} className="text-expense-600 underline">
+                    undo
+                  </button>
+                </>
+              )}
             </span>
           </span>
           <span className={`shrink-0 tabular-nums ${a.kind === "CHARGE" ? "" : "text-income-600"}`}>

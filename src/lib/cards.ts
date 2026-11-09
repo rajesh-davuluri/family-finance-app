@@ -17,6 +17,7 @@ export type CardActivity = {
   kind: ActivityKind;
   source: "CARD" | "TRANSFER"; // logged on the card itself, or a transfer from a bank account
   label: string;
+  transferId?: string; // a payment recorded as a transfer, which can be undone
 };
 export type RecordedStatement = { id: string; closingDate: string; balance: number; minimumDue: number | null; dueDate: string | null };
 export type CardInput = {
@@ -259,4 +260,30 @@ export function classifyCardTransaction(direction: "INCOME" | "EXPENSE", kind: s
   if (direction === "EXPENSE") return "CHARGE";
   if (kind === "TRANSFER" || kind === "LOAN" || /\bpayment\b|thank you|autopay|\bpymt\b|e-?payment/i.test(text)) return "PAYMENT";
   return "CREDIT";
+}
+
+// ---- due-date reminders ------------------------------------------------------
+
+// Days before the due date to remind (0 = the day itself, -1 = the day after,
+// if it's still unpaid).
+export const CARD_REMINDER_DAYS = [5, 1, 0, -1];
+
+function fmt(n: number, currency: string) {
+  const sym = currency === "INR" ? "₹" : currency === "USD" ? "$" : `${currency} `;
+  return `${sym}${n.toLocaleString(currency === "INR" ? "en-IN" : "en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const shortDate = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
+
+// The reminder for a card today, or null when none is due: only an unpaid
+// statement, and only on the reminder days.
+export function cardReminder(card: { name: string; last4: string | null; currency: string }, s: CardSnapshot): string | null {
+  if (!s.statement || s.daysToDue == null || !CARD_REMINDER_DAYS.includes(s.daysToDue)) return null;
+  if (s.leftOnStatement <= EPS) return null;
+  const name = `${card.name}${card.last4 ? ` ••${card.last4}` : ""}`;
+  const when =
+    s.daysToDue === 0 ? "is due today" : s.daysToDue === 1 ? "is due tomorrow" : s.daysToDue < 0 ? "was due yesterday and isn't paid" : `is due in ${s.daysToDue} days`;
+  const min = s.minimumLeft != null && s.minimumLeft > EPS && s.minimumLeft < s.leftOnStatement - EPS ? ` (minimum ${fmt(s.minimumLeft, card.currency)})` : "";
+  const tail = s.daysToDue < 0 ? " Pay it today to limit the late fee and interest." : " Pay the full amount to avoid interest.";
+  return `${name}: ${fmt(s.leftOnStatement, card.currency)} ${when} (${shortDate(s.statement.dueDate)})${min}.${tail}`;
 }
