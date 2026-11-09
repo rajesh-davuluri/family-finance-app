@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { rememberNotDuplicates } from "@/lib/duplicateData";
 import { Currency } from "@/lib/enums";
 
 // A row is either a transaction in a category, or -- for a card payment, a
@@ -14,6 +15,8 @@ const rowSchema = z
     categoryId: z.string().optional(),
     transferToInstrumentId: z.string().optional(),
     notes: z.string().optional(),
+    // Imported although it matched this transaction: not a duplicate of it.
+    notDuplicateOf: z.string().max(64).optional(),
   })
   .refine((r) => !!r.categoryId !== !!r.transferToInstrumentId, { message: "Each row needs a category or a transfer account." });
 
@@ -82,8 +85,30 @@ export async function POST(req: Request) {
         createdById: user.id,
       },
     });
+    // Rows kept despite matching an existing transaction are created one by
+    // one, so the pair can be remembered as not a duplicate.
+    const kept = txnRows.filter((r) => r.notDuplicateOf);
+    const keptPairs: [string, string][] = [];
+    for (const r of kept) {
+      const t = await tx.transaction.create({
+        data: {
+          amount: r.amount,
+          currency,
+          date: new Date(r.date),
+          notes: r.notes,
+          categoryId: r.categoryId!,
+          instrumentId,
+          householdId: user.householdId,
+          createdById: user.id,
+          importBatchId: batch.id,
+          source: "IMPORTED",
+        },
+        select: { id: true },
+      });
+      keptPairs.push([t.id, r.notDuplicateOf!]);
+    }
     const created = await tx.transaction.createMany({
-      data: txnRows.map((r) => ({
+      data: txnRows.filter((r) => !r.notDuplicateOf).map((r) => ({
         amount: r.amount,
         currency,
         date: new Date(r.date),
@@ -108,8 +133,10 @@ export async function POST(req: Request) {
         createdById: user.id,
       })),
     });
-    return { transactions: created.count, transfers: transfers.count };
+    return { transactions: created.count + kept.length, transfers: transfers.count, keptPairs };
   });
+
+  await rememberNotDuplicates(user.householdId, result.keptPairs);
 
   return NextResponse.json(
     { imported: result.transactions + result.transfers, transactions: result.transactions, transfers: result.transfers },

@@ -49,6 +49,7 @@ model Household {
   telegramLinks TelegramLink[]
   policies      InsurancePolicy[]
   itemCategoryRules  ItemCategoryRule[]
+  duplicateDecisions DuplicateDecision[]
   investmentAccounts InvestmentAccount[]
 }
 
@@ -659,4 +660,19 @@ model RemittanceDetail {
   feeUsd        Decimal?    @db.Decimal(10, 2)
 
   updatedAt DateTime @updatedAt
+}
+
+// Two transactions the household confirmed are NOT duplicates ("keep
+// both", or added / imported anyway after the warning), so the pair is
+// never raised again on any device. Ids are kept sorted (txnA < txnB); a
+// pair whose transaction is later deleted simply never matches again.
+model DuplicateDecision {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  txnA        String    @db.NVarChar(64)
+  txnB        String    @db.NVarChar(64)
+  createdAt   DateTime  @default(now())
+
+  @@unique([householdId, txnA, txnB])
 }

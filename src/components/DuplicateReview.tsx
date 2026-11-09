@@ -27,6 +27,8 @@ type Pair = {
   removeTxn: Txn;
 };
 
+// Where "keep both" used to be remembered, in this browser only. Anything
+// still here is moved to the household's record once, then cleared.
 const DISMISSED_KEY = "ff.duplicates.dismissed";
 const SOURCE_WORDS: Record<string, string> = {
   IMPORTED: "from statement",
@@ -54,25 +56,39 @@ export default function DuplicateReview({ refreshKey, onRemoved }: { refreshKey:
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDismissed(readDismissed());
-    fetch("/api/transactions/duplicates")
-      .then((r) => (r.ok ? r.json() : { pairs: [] }))
-      .then((b) => setPairs(b.pairs))
-      .catch(() => setPairs([]));
+    let cancelled = false;
+    (async () => {
+      const local = readDismissed();
+      setDismissed(local);
+      if (local.size) {
+        const moved = await saveKeepBoth([...local].map((k) => k.split("|") as [string, string]));
+        if (moved) {
+          try {
+            localStorage.removeItem(DISMISSED_KEY);
+          } catch {
+            /* private mode */
+          }
+        }
+      }
+      const b = await fetch("/api/transactions/duplicates")
+        .then((r) => (r.ok ? r.json() : { pairs: [] }))
+        .catch(() => ({ pairs: [] }));
+      if (!cancelled) setPairs(b.pairs);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refreshKey]);
 
   const visible = (pairs ?? []).filter((p) => !dismissed.has(pairKey(p)));
   if (visible.length === 0) return null;
   const likely = visible.filter((p) => p.confidence === "HIGH").length;
 
-  function keepBoth(p: Pair) {
-    const next = new Set(dismissed).add(pairKey(p));
-    setDismissed(next);
-    try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(next)));
-    } catch {
-      // Private window etc.: it just won't be remembered.
-    }
+  // Remembered for the household, so the pair isn't asked about again on
+  // any device.
+  async function keepBoth(p: Pair) {
+    setDismissed((d) => new Set(d).add(pairKey(p)));
+    if (!(await saveKeepBoth([[p.keep, p.remove]]))) setError("Couldn't save that — it may be asked again.");
   }
 
   async function remove(p: Pair) {
@@ -157,4 +173,19 @@ function TxnCard({ t, label, muted }: { t: Txn; label: string; muted?: boolean }
       </p>
     </div>
   );
+}
+
+async function saveKeepBoth(pairs: [string, string][]): Promise<boolean> {
+  const valid = pairs.filter(([a, b]) => a && b);
+  if (!valid.length) return true;
+  try {
+    const res = await fetch("/api/transactions/duplicates/decisions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairs: valid.slice(0, 500).map(([a, b]) => ({ a, b })) }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

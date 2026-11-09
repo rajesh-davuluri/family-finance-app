@@ -93,3 +93,30 @@ export function describeExisting(e: ExistingTxn) {
     source: e.source,
   };
 }
+
+// ---- decisions -----------------------------------------------------------
+
+// A pair of transactions, in a fixed order, as stored.
+export function pairOf(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
+export const pairKey = (a: string, b: string) => pairOf(a, b).join("|");
+
+// Pairs the household has said are not duplicates.
+export async function settledPairs(householdId: string): Promise<Set<string>> {
+  const rows = await prisma.duplicateDecision.findMany({ where: { householdId }, select: { txnA: true, txnB: true } });
+  return new Set(rows.map((r) => `${r.txnA}|${r.txnB}`));
+}
+
+// Remember that these pairs are not duplicates, so they're never raised again.
+export async function rememberNotDuplicates(householdId: string, pairs: [string, string][]) {
+  const unique = new Map<string, [string, string]>();
+  for (const [a, b] of pairs) if (a && b && a !== b) unique.set(pairKey(a, b), pairOf(a, b));
+  for (const [txnA, txnB] of unique.values()) {
+    await prisma.duplicateDecision.upsert({
+      where: { householdId_txnA_txnB: { householdId, txnA, txnB } },
+      create: { householdId, txnA, txnB },
+      update: {},
+    });
+  }
+}

@@ -284,6 +284,8 @@ export default function AddTransactionModal({
 
   async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
+    // "Add anyway" after the warning: the transaction it looked like.
+    const notDuplicateOf = allowDuplicate ? duplicate?.id : undefined;
     setError(null);
     setDuplicate(null);
     if (!form.categoryId || !form.instrumentId) {
@@ -292,7 +294,7 @@ export default function AddTransactionModal({
     }
     setSubmitting(true);
     if (split?.enabled && split.parts.length > 0) {
-      await submitSplit(allowDuplicate);
+      await submitSplit(allowDuplicate, notDuplicateOf);
       return;
     }
     const res = await fetch(isEditing ? `/api/transactions/${editingTransaction!.id}` : "/api/transactions", {
@@ -301,7 +303,7 @@ export default function AddTransactionModal({
       body: JSON.stringify({
         ...form,
         amount: parseFloat(form.amount),
-        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+        ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
       }),
     });
     setSubmitting(false);
@@ -327,7 +329,7 @@ export default function AddTransactionModal({
   }
 
   // Save the bill split by category: a new bill, or this transaction split.
-  async function submitSplit(allowDuplicate: boolean) {
+  async function submitSplit(allowDuplicate: boolean, notDuplicateOf?: string) {
     if (isEditing) {
       // Date, account or note changes first; the split copies them to every part.
       const patch = await fetch(`/api/transactions/${editingTransaction!.id}`, {
@@ -352,7 +354,7 @@ export default function AddTransactionModal({
         notes: form.notes || null,
         parts: split!.parts,
         items: split!.items,
-        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+        ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
       }),
     });
     setSubmitting(false);

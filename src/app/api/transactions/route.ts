@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { describeExisting, findExistingDuplicate } from "@/lib/duplicateData";
+import { describeExisting, findExistingDuplicate, rememberNotDuplicates } from "@/lib/duplicateData";
 import { Currency } from "@/lib/enums";
 import { notifyHousehold } from "@/lib/notify";
 
@@ -15,6 +15,8 @@ const createSchema = z.object({
   instrumentId: z.string(),
   // Set after the person has seen the duplicate warning and chosen to add it anyway.
   allowDuplicate: z.boolean().optional(),
+  // Added anyway after the duplicate warning: remember that pair is fine.
+  notDuplicateOf: z.string().max(64).optional(),
 });
 
 export async function GET(req: Request) {
@@ -104,6 +106,8 @@ export async function POST(req: Request) {
     },
     include: { category: true, instrument: true },
   });
+
+  if (data.notDuplicateOf) await rememberNotDuplicates(user.householdId, [[transaction.id, data.notDuplicateOf]]);
 
   const verb = category.direction === "INCOME" ? "income" : "an expense";
   await notifyHousehold(

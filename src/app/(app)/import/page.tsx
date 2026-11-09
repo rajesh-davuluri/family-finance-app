@@ -447,6 +447,8 @@ export default function ImportPage() {
             ? { transferToInstrumentId: r.transferToId }
             : { categoryId: realId.get(r.categoryId) ?? r.categoryId }),
           notes: r.rawDescription || undefined,
+          // Ticked although it matched an existing transaction: remember it's not a copy.
+          ...(!r.transferToId && r.match && r.match.source !== "TRANSFER" ? { notDuplicateOf: r.match.id } : {}),
         })),
         file: {
           name: fileName || "Unnamed file",
