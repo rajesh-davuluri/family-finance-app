@@ -44,7 +44,7 @@ const CARD_PAYEES: { line: RegExp; card: RegExp; label: string }[] = [
 // Money-transfer services sending dollars to an Indian bank account (Crobo
 // runs on Cybrid). Not spending and not investing: the money moves to your
 // own account abroad.
-const REMITTANCE = /\bCYBRID\b|\bCROBO\b|\bREMITLY\b|\bTRANSFERWISE\b|\bWISE\s*(US|INC|PAYMENTS)\b|\bXOOM\b|\bWESTERN\s*UNION\b|\bREMIT2INDIA\b/i;
+export const REMITTANCE = /\bCYBRID\b|\bCROBO\b|\bREMITLY\b|\bTRANSFERWISE\b|\bWISE\s*(US|INC|PAYMENTS)\b|\bXOOM\b|\bWESTERN\s*UNION\b|\bREMIT2INDIA\b/i;
 
 const INVESTMENT = /\bCOINBASE\b|\bROBINHOOD\s*(SECURITIES|MONEY|CRYPTO|DES:\s*DEBITS)\b|\bFIDELITY\b|\bVANGUARD\b|\bSCHWAB\b|\bE\*?TRADE\b|\bACORNS\b|\bBETTERMENT\b|\bWEALTHFRONT\b|\bM1\s*FINANCE\b/i;
 
