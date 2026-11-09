@@ -17,7 +17,13 @@ export async function GET() {
   const from = new Date(Date.parse(`${today}T00:00:00Z`) - LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
   const txns = await loadForDuplicateCheck(user.householdId, from, today);
   const byId = new Map(txns.map((t) => [t.id, t]));
-  const pairs = findPairs(txns).map((p) => ({
+  // A bill split by category is the itemised record: keep it and offer to
+  // remove the plain copy; two split bills are left alone.
+  const split = (id: string) => !!byId.get(id)?.splitGroupId;
+  const pairs = findPairs(txns)
+    .filter((p) => !(split(p.keep) && split(p.remove)))
+    .map((p) => (split(p.remove) ? { ...p, keep: p.remove, remove: p.keep } : p))
+    .map((p) => ({
     ...p,
     keepTxn: describeExisting(byId.get(p.keep)!),
     removeTxn: describeExisting(byId.get(p.remove)!),

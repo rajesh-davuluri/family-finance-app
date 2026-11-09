@@ -5,6 +5,8 @@ import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { money } from "@/lib/money";
 import { categoryHint, type ReceiptGuess } from "@/lib/receiptParse";
+import { parseReceiptItems, type ReceiptItem } from "@/lib/receiptItems";
+import SplitEditor, { type SplitValue } from "@/components/SplitEditor";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -36,6 +38,9 @@ export type EditableTransaction = {
   categoryId: string;
   instrumentId: string;
   hasPhoto?: boolean;
+  // When this is one part of a bill split by category: the whole charge.
+  splitTotal?: number;
+  splitParts?: number;
 };
 
 const SCAN_STAGE: Record<string, string> = {
@@ -88,6 +93,25 @@ export default function AddTransactionModal({
   const [removeStoredPhoto, setRemoveStoredPhoto] = useState(false);
   const [scan, setScan] = useState<{ stage: string; fraction: number } | null>(null);
   const [scanNote, setScanNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // Receipt items for splitting the bill by category, and what the split is.
+  const [receiptItems, setReceiptItems] = useState<{ items: ReceiptItem[]; rules: Record<string, string>; n: number } | null>(null);
+  const [split, setSplit] = useState<SplitValue | null>(null);
+  const pickFor = useRef<"attach" | "split">("attach");
+
+  async function showItems(text: string) {
+    const items = parseReceiptItems(text);
+    if (items.length < 2) return false;
+    let rules: Record<string, string> = {};
+    try {
+      const r = await fetch("/api/transactions/item-rules");
+      if (r.ok) rules = (await r.json()).rules ?? {};
+    } catch {
+      /* guess from item names alone */
+    }
+    setSplit(null);
+    setReceiptItems((old) => ({ items, rules, n: (old?.n ?? 0) + 1 }));
+    return true;
+  }
 
   function setNewPhoto(b: Blob | null) {
     setPhoto(b);
@@ -103,6 +127,27 @@ export default function AddTransactionModal({
     if (!file) return;
     setError(null);
     setScanNote(null);
+    if (isEditing && pickFor.current === "split") {
+      // Read an existing charge's receipt to split it by category.
+      try {
+        const { scanBill } = await import("@/lib/billScan");
+        setScan({ stage: "preparing", fraction: 0 });
+        const result = await scanBill(file, getTodayLocal(), (stage, fraction) => setScan({ stage, fraction }));
+        setNewPhoto(result.photo);
+        setRemoveStoredPhoto(false);
+        const found = await showItems(result.text);
+        setScanNote(
+          found
+            ? { ok: true, text: "Items read from the receipt — check how they're split below." }
+            : { ok: false, text: "Couldn't make out the items on this receipt. The photo will still be saved." },
+        );
+      } catch {
+        setError("Couldn't read that photo.");
+      } finally {
+        setScan(null);
+      }
+      return;
+    }
     if (isEditing) {
       try {
         const { shrinkPhoto } = await import("@/lib/billScan");
@@ -119,6 +164,7 @@ export default function AddTransactionModal({
       const result = await scanBill(file, getTodayLocal(), (stage, fraction) => setScan({ stage, fraction }));
       setNewPhoto(result.photo);
       await applyGuess(result.guess, result.text);
+      await showItems(result.text);
     } catch (e) {
       // Keep the photo even when it can't be read.
       try {
@@ -205,6 +251,9 @@ export default function AddTransactionModal({
     setScanNote(null);
     setRemoveStoredPhoto(false);
     setHasStoredPhoto(!!editingTransaction?.hasPhoto);
+    setReceiptItems(null);
+    setSplit(null);
+    pickFor.current = "attach";
     Promise.all([fetch("/api/categories"), fetch("/api/instruments")]).then(async ([catRes, instRes]) => {
       const cats = await catRes.json();
       const insts = await instRes.json();
@@ -242,6 +291,10 @@ export default function AddTransactionModal({
       return;
     }
     setSubmitting(true);
+    if (split?.enabled && split.parts.length > 0) {
+      await submitSplit(allowDuplicate);
+      return;
+    }
     const res = await fetch(isEditing ? `/api/transactions/${editingTransaction!.id}` : "/api/transactions", {
       method: isEditing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -273,7 +326,57 @@ export default function AddTransactionModal({
     onSuccess();
   }
 
+  // Save the bill split by category: a new bill, or this transaction split.
+  async function submitSplit(allowDuplicate: boolean) {
+    if (isEditing) {
+      // Date, account or note changes first; the split copies them to every part.
+      const patch = await fetch(`/api/transactions/${editingTransaction!.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
+      });
+      if (!patch.ok) {
+        setSubmitting(false);
+        setError("Couldn't save the changes.");
+        return;
+      }
+    }
+    const res = await fetch("/api/transactions/split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(isEditing ? { transactionId: editingTransaction!.id } : {}),
+        date: form.date,
+        instrumentId: form.instrumentId,
+        currency: form.currency,
+        notes: form.notes || null,
+        parts: split!.parts,
+        items: split!.items,
+        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+      }),
+    });
+    setSubmitting(false);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      if (res.status === 409 && body?.duplicate) return setDuplicate(body.duplicate);
+      return setError(typeof body?.error === "string" ? body.error : "Couldn't save the split.");
+    }
+    const photoError = body?.primaryId ? await savePhoto(body.primaryId) : null;
+    if (photoError) window.alert(`The bill was saved, but ${photoError}. Open it and attach the photo again.`);
+    if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setNewPhoto(null);
+    setScanNote(null);
+    setReceiptItems(null);
+    setSplit(null);
+    setDuplicate(null);
+    onSuccess();
+  }
+
   if (!open) return null;
+
+  const splitOn = !!split?.enabled && split.parts.length > 0;
+  const isExpense = categories.find((c) => c.id === form.categoryId)?.direction !== "INCOME";
+  const splitTotal = isEditing ? editingTransaction?.splitTotal ?? Number(editingTransaction?.amount ?? 0) : parseFloat(form.amount) || 0;
 
   const noSetupYet = !loading && (categories.length === 0 || instruments.length === 0);
 
@@ -376,10 +479,50 @@ export default function AddTransactionModal({
                   </div>
                 )}
                 {!photoUrl && scanNote && !scanNote.ok && <p className="text-sm text-amber-800">{scanNote.text}</p>}
-                {isEditing && !photoUrl && (!hasStoredPhoto || removeStoredPhoto) && (
-                  <button type="button" onClick={() => fileRef.current?.click()} className="text-sm text-brand-700 underline">
-                    📷 Attach a bill photo
-                  </button>
+                {isEditing && !photoUrl && !scan && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                    {isExpense && !receiptItems && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          pickFor.current = "split";
+                          fileRef.current?.click();
+                        }}
+                        className="text-brand-700 underline"
+                      >
+                        🧾 Scan the receipt to split by category
+                      </button>
+                    )}
+                    {(!hasStoredPhoto || removeStoredPhoto) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          pickFor.current = "attach";
+                          fileRef.current?.click();
+                        }}
+                        className="text-brand-700 underline"
+                      >
+                        📷 Attach a bill photo
+                      </button>
+                    )}
+                  </div>
+                )}
+                {isEditing && (editingTransaction?.splitParts ?? 0) > 1 && !receiptItems && (
+                  <p className="text-xs text-gray-500">
+                    One of {editingTransaction!.splitParts} parts of a {money(editingTransaction!.splitTotal ?? 0, editingTransaction!.currency)} bill split by
+                    category.
+                  </p>
+                )}
+                {receiptItems && (
+                  <SplitEditor
+                    key={receiptItems.n}
+                    items={receiptItems.items}
+                    rules={receiptItems.rules}
+                    categories={categories}
+                    total={splitTotal}
+                    currency={form.currency}
+                    onChange={setSplit}
+                  />
                 )}
               </div>
             )}
@@ -409,10 +552,15 @@ export default function AddTransactionModal({
                   </option>
                 ))}
               </select>
+              {splitOn && (
+                <p className="rounded-md border border-dashed px-3 py-2 text-sm text-gray-600 sm:col-span-2">
+                  Category: split across {split!.parts.length} (above)
+                </p>
+              )}
               <select
                 value={form.categoryId}
                 onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
+                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${splitOn ? "hidden" : ""}`}
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -506,7 +654,7 @@ export default function AddTransactionModal({
                   disabled={submitting || noSetupYet || !!scan}
                   className="flex-1 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:flex-none sm:py-2"
                 >
-                  {submitting ? "Saving..." : isEditing ? "Save Changes" : "Add Transaction"}
+                  {submitting ? "Saving..." : splitOn ? `Save as ${split!.parts.length} parts` : isEditing ? "Save Changes" : "Add Transaction"}
                 </button>
               </div>
             </form>
