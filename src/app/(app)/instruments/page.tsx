@@ -2,9 +2,13 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { AccountFreshness } from "@/components/AccountActivity";
+import Link from "next/link";
+import { money } from "@/lib/money";
 import AccountDetailsPanel from "@/components/AccountDetailsPanel";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+
+type CardOwed = { hasCycle: boolean; owed: number | null; left: number; status: string | null; due: string | null };
 
 type Instrument = {
   id: string;
@@ -42,6 +46,8 @@ const TYPE_LABELS: Record<string, string> = {
 export default function InstrumentsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  // Credit cards: what's owed, from their statements (the Credit cards page).
+  const [cardOwed, setCardOwed] = useState<Map<string, CardOwed>>(new Map());
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +76,18 @@ export default function InstrumentsPage() {
 
   async function load() {
     setLoading(true);
-    const [instRes, transferRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/transfers")]);
+    const [instRes, transferRes, cardsRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/transfers"), fetch("/api/cards")]);
+    if (cardsRes.ok) {
+      const { cards } = await cardsRes.json();
+      setCardOwed(
+        new Map(
+          (cards as { id: string; snapshot: { hasCycle: boolean; outstanding: number | null; leftOnStatement: number; status: string | null; statement: { dueDate: string } | null } }[]).map((c) => [
+            c.id,
+            { hasCycle: c.snapshot.hasCycle, owed: c.snapshot.outstanding, left: c.snapshot.leftOnStatement, status: c.snapshot.status, due: c.snapshot.statement?.dueDate ?? null },
+          ]),
+        ),
+      );
+    }
     const insts: Instrument[] = await instRes.json();
     setInstruments(insts);
     setTransfers(await transferRes.json());
@@ -256,10 +273,17 @@ export default function InstrumentsPage() {
         {error && <p className="text-sm text-red-600 sm:col-span-5">{error}</p>}
       </form>
 
-      <CreditCardLimits
-        cards={activeInstruments.filter((i) => i.type === "CREDIT_CARD")}
-        onChanged={load}
-      />
+      {activeInstruments.some((i) => i.type === "CREDIT_CARD") && (
+        <Link href="/cards" className="flex items-center justify-between gap-3 rounded-lg border bg-white p-4 text-sm active:bg-gray-50">
+          <span>
+            <span className="block font-medium">Credit cards</span>
+            <span className="block text-gray-500">Statements, what&apos;s owed, due dates, limits and Mark paid are on the Credit cards page.</span>
+          </span>
+          <span aria-hidden className="text-gray-400">
+            ›
+          </span>
+        </Link>
+      )}
 
       <div className="overflow-x-auto rounded-lg border bg-white">
         <table className="w-full min-w-[640px] text-sm">
@@ -284,7 +308,9 @@ export default function InstrumentsPage() {
                 <td className="p-3">{TYPE_LABELS[i.type] ?? i.type}</td>
                 <td className="p-3">{i.currency}</td>
                 <td className="p-3">
-                  {editingBalanceId === i.id ? (
+                  {i.type === "CREDIT_CARD" ? (
+                    <CardBalance owed={cardOwed.get(i.id)} currency={i.currency} archived={i.archived} />
+                  ) : editingBalanceId === i.id ? (
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -510,183 +536,25 @@ export default function InstrumentsPage() {
   );
 }
 
-function money(currency: string, n: number) {
-  return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-// Utilization bands match the usual credit-score guidance: under 30% is
-// healthy, 30-70% is worth watching, above 70% is high.
-function utilizationColor(pct: number) {
-  if (pct < 30) return "bg-income-500";
-  if (pct < 70) return "bg-brand-400";
-  return "bg-expense-500";
-}
-
-function CreditCardLimits({ cards, onChanged }: { cards: Instrument[]; onChanged: () => void }) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [limitInput, setLimitInput] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  if (cards.length === 0) return null;
-
-  async function saveLimit(id: string) {
-    const value = limitInput.trim() === "" ? null : parseFloat(limitInput);
-    if (value !== null && (isNaN(value) || value <= 0)) {
-      setSaveError("Enter a limit greater than zero, or leave it empty to clear it.");
-      return;
-    }
-    const res = await fetch(`/api/instruments/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ creditLimit: value }),
-    });
-    if (!res.ok) {
-      setSaveError("Couldn't save that limit.");
-      return;
-    }
-    setSaveError(null);
-    setEditingId(null);
-    onChanged();
+// A card's balance is what its statements say (src/lib/cards.ts), not the
+// sum of its charges -- payments would never come off that.
+function CardBalance({ owed, currency, archived }: { owed: CardOwed | undefined; currency: string; archived: boolean }) {
+  if (archived) return <span className="text-xs text-gray-400">—</span>;
+  if (!owed || !owed.hasCycle || owed.owed == null) {
+    return (
+      <Link href="/cards" className="text-xs text-brand-600 hover:underline">
+        Set up on Credit cards
+      </Link>
+    );
   }
-
-  // Owed = the negative part of the balance; a positive balance is a credit
-  // (e.g. a refund or overpayment), which uses none of the limit.
-  const rows = cards.map((c) => {
-    const limit = c.creditLimit !== null ? Number(c.creditLimit) : null;
-    const owed = c.currentBalance !== null ? Math.max(0, -c.currentBalance) : null;
-    const available = limit !== null && owed !== null ? limit - owed : null;
-    const pct = limit !== null && owed !== null && limit > 0 ? (owed / limit) * 100 : null;
-    return { card: c, limit, owed, available, pct };
-  });
-
-  // Totals only make sense within one currency.
-  const totals = new Map<string, { limit: number; owed: number }>();
-  for (const r of rows) {
-    if (r.limit === null || r.owed === null) continue;
-    const t = totals.get(r.card.currency) ?? { limit: 0, owed: 0 };
-    t.limit += r.limit;
-    t.owed += r.owed;
-    totals.set(r.card.currency, t);
-  }
-
   return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold">Credit cards</h2>
-        <p className="text-sm text-gray-500">
-          Limit, how much is used (what you currently owe), and what&apos;s still available on each card.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {rows.map(({ card, limit, owed, available, pct }) => (
-          <div key={card.id} className="space-y-2 rounded-lg border bg-white p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-medium">
-                {card.name}
-                {card.last4 && <span className="text-gray-400"> ({card.last4})</span>}
-              </span>
-              {editingId === card.id ? (
-                <span className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    autoFocus
-                    value={limitInput}
-                    onChange={(e) => setLimitInput(e.target.value)}
-                    className="w-28 rounded border px-2 py-1 text-xs"
-                    placeholder="Limit"
-                  />
-                  <button onClick={() => saveLimit(card.id)} className="text-xs text-brand-600 hover:underline">
-                    Save
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingId(null);
-                      setSaveError(null);
-                    }}
-                    className="text-xs text-gray-400 hover:underline"
-                  >
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button
-                  onClick={() => {
-                    setLimitInput(limit !== null ? String(limit) : "");
-                    setSaveError(null);
-                    setEditingId(card.id);
-                  }}
-                  className="text-xs text-brand-600 hover:underline"
-                >
-                  {limit !== null ? `Limit ${money(card.currency, limit)} (edit)` : "Set limit"}
-                </button>
-              )}
-            </div>
-            {editingId === card.id && saveError && <p className="text-xs text-red-600">{saveError}</p>}
-
-            {owed === null ? (
-              <p className="text-xs text-gray-400">
-                Set this card&apos;s balance (amount owed) in the table below to see how much is used.
-              </p>
-            ) : limit === null ? (
-              <p className="text-sm text-gray-600">
-                Used <span className="font-medium">{money(card.currency, owed)}</span>
-                <span className="text-xs text-gray-400">
-                  {card.balanceFromTransactionsOnly && " (from transactions)"} — set a limit to see what&apos;s remaining.
-                </span>
-              </p>
-            ) : (
-              <>
-                {card.balanceFromTransactionsOnly && (
-                  <p className="text-xs text-gray-400">
-                    Based on transactions in the app — set a starting balance below if it doesn&apos;t match your
-                    statement.
-                  </p>
-                )}
-                <div className="h-2 overflow-hidden rounded-full bg-ink-100">
-                  <div
-                    className={`h-full ${utilizationColor(pct!)}`}
-                    style={{ width: `${Math.min(100, pct!)}%` }}
-                  />
-                </div>
-                <div className="grid grid-cols-3 text-sm">
-                  <div>
-                    <div className="text-xs text-gray-500">Used</div>
-                    <div className="font-medium">{money(card.currency, owed)}</div>
-                    <div className="text-xs text-gray-400">{pct!.toFixed(0)}% of limit</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">{available! < 0 ? "Over limit by" : "Remaining"}</div>
-                    <div className={`font-medium ${available! < 0 ? "text-expense-600" : "text-income-600"}`}>
-                      {money(card.currency, Math.abs(available!))}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Limit</div>
-                    <div className="font-medium">{money(card.currency, limit)}</div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {totals.size > 0 && (
-        <div className="rounded-lg border bg-white p-4 text-sm">
-          {Array.from(totals.entries()).map(([currency, t]) => {
-            const pct = t.limit > 0 ? (t.owed / t.limit) * 100 : 0;
-            return (
-              <p key={currency}>
-                <span className="font-medium">All cards ({currency}):</span> used {money(currency, t.owed)} of{" "}
-                {money(currency, t.limit)} ({pct.toFixed(0)}%) — {money(currency, t.limit - t.owed)} remaining
-              </p>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <Link href="/cards" className="block hover:underline">
+      <span className="font-medium">
+        {owed.owed < 0 ? "Credit" : "Owed"} {money(Math.abs(owed.owed), currency)}
+      </span>
+      <span className="block text-xs text-gray-400">
+        {owed.left > 0.005 && owed.due ? `${money(owed.left, currency)} due ${formatDate(owed.due, { month: "short", day: "numeric" })}` : "statement paid"}
+      </span>
+    </Link>
   );
 }

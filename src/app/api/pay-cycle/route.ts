@@ -69,6 +69,7 @@ export async function GET() {
       householdId: user.householdId,
       active: true,
       nextRunAt: { gt: now, lte: nextPaycheck },
+      instrument: { archived: false },
     },
     include: { category: true, instrument: true },
   });
