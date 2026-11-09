@@ -29,6 +29,12 @@ model Household {
   inviteCode String   @unique @default(cuid())
   createdAt  DateTime @default(now())
 
+  // The emergency fund: money set aside for emergencies (typed in), and how
+  // many months of essential spending it should cover. A bank account named
+  // "Emergency..." with a balance takes the place of the typed-in amount.
+  emergencyFundUsd     Decimal? @db.Decimal(12, 2)
+  emergencyTargetMonths Int      @default(6)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
