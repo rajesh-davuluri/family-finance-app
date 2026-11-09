@@ -194,3 +194,50 @@ export async function fetchPrices(targets: PriceTarget[], fetchFn: FetchFn = fet
 
   return { prices, failed, usdInr: isQuote(fx) ? fxOk(fx.price) : null, sources };
 }
+
+// ---- USD/INR history -----------------------------------------------------
+
+// Daily USD->INR closes from Yahoo's chart endpoint ("INR=X"), as
+// date (YYYY-MM-DD) -> rate. For comparing a transfer's rate with the
+// market's that day.
+export function parseRateHistory(json: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  const r = (json as { chart?: { result?: { timestamp?: number[]; indicators?: { quote?: { close?: (number | null)[] }[] } }[] } })?.chart?.result?.[0];
+  const ts = r?.timestamp ?? [];
+  const close = r?.indicators?.quote?.[0]?.close ?? [];
+  ts.forEach((t, i) => {
+    const v = close[i];
+    // Yahoo stamps a day's FX candle at that day's start, London time.
+    if (typeof v === "number" && v > 50 && v < 200) out.set(new Date((t + 6 * 3600) * 1000).toISOString().slice(0, 10), v);
+  });
+  return out;
+}
+
+let rateCache: { at: number; rates: Map<string, number> } | null = null;
+
+export async function usdInrHistory(fetchFn: FetchFn = fetch): Promise<Map<string, number> | null> {
+  if (rateCache && Date.now() - rateCache.at < 6 * 3600 * 1000) return rateCache.rates;
+  for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+    try {
+      const res = await fetchFn(`https://${host}/v8/finance/chart/INR%3DX?range=2y&interval=1d`, { headers: UA, signal: AbortSignal.timeout(8000), cache: "no-store" });
+      if (!res.ok) continue;
+      const rates = parseRateHistory(await res.json());
+      if (rates.size) {
+        rateCache = { at: Date.now(), rates };
+        return rates;
+      }
+    } catch {
+      /* try the other host */
+    }
+  }
+  return null;
+}
+
+// The market rate on a day, or the last one before it (weekends, holidays).
+export function rateOn(rates: Map<string, number>, date: string): number | null {
+  if (rates.has(date)) return rates.get(date)!;
+  const before = [...rates.keys()].filter((d) => d <= date).sort();
+  const last = before[before.length - 1];
+  return last && daysApart(last, date) <= 7 ? rates.get(last)! : null;
+}
+const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;

@@ -26,6 +26,7 @@ const moreLinks = [
   { href: "/cards", label: "Credit cards" },
   { href: "/reports", label: "Reports" },
   { href: "/investments", label: "Investments" },
+  { href: "/remittances", label: "Money to India" },
   { href: "/policies", label: "Policies" },
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
@@ -52,6 +53,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
     links: [
       { href: "/investments", label: "Investments", hint: "Stocks, funds, 401(k)" },
       { href: "/net-worth", label: "Net worth", hint: "Own minus owe" },
+      { href: "/remittances", label: "Money to India", hint: "Transfers, rates, what they cost" },
       { href: "/policies", label: "Policies", hint: "LIC, term, premiums" },
     ],
   },

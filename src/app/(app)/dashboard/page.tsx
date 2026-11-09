@@ -7,6 +7,7 @@ import SpendTiles from "@/components/SpendTiles";
 import AttentionStrip from "@/components/dashboard/AttentionStrip";
 import Overview from "@/components/dashboard/Overview";
 import WealthLine from "@/components/dashboard/WealthLine";
+import EmergencyFund from "@/components/dashboard/EmergencyFund";
 import DrillSheet, { type Drill } from "@/components/dashboard/DrillSheet";
 import { announceTransactionsChanged } from "@/lib/events";
 import { formatDateTime } from "@/lib/lastActivity";
@@ -77,6 +78,8 @@ export default function DashboardPage() {
       <Overview onDrill={setDrill}>
         <SpendTiles />
       </Overview>
+
+      <EmergencyFund />
 
       <WealthLine />
 
