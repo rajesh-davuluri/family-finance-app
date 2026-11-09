@@ -25,6 +25,7 @@ type Transaction = {
   importBatchId?: string | null;
   importBatch?: { fileName: string } | null;
   attachment?: { id: string } | null;
+  splitGroupId?: string | null;
 };
 
 const EMPTY_SEARCH = { from: "", to: "", instrumentId: "", categoryId: "" };
@@ -183,6 +184,12 @@ export default function TransactionsPage() {
       categoryId: t.category.id,
       instrumentId: t.instrument.id,
       hasPhoto: !!t.attachment,
+      ...(t.splitGroupId
+        ? (() => {
+            const parts = transactions.filter((x) => x.splitGroupId === t.splitGroupId);
+            return { splitParts: parts.length, splitTotal: Math.round(parts.reduce((sum, x) => sum + Number(x.amount), 0) * 100) / 100 };
+          })()
+        : {}),
     });
   }
 
@@ -217,7 +224,7 @@ export default function TransactionsPage() {
   }
   const searchActive = search.from || search.to || search.instrumentId || search.categoryId;
   const activeFilters = [search.from || search.to, search.instrumentId, search.categoryId].filter(Boolean).length;
-  const shown = filteredTransactions.slice(0, visible);
+  const shown = keepSplitsTogether(filteredTransactions).slice(0, visible);
 
   return (
     <div className="space-y-6">
@@ -482,6 +489,7 @@ export default function TransactionsPage() {
                         {t.notes || t.category.name}
                       </span>
                       <span className="block truncate text-xs text-gray-500">
+                        {t.splitGroupId && <span className="mr-1 rounded bg-brand-50 px-1 text-[10px] font-medium uppercase text-brand-700">split</span>}
                         {t.notes ? `${t.category.name} · ` : ""}
                         {t.instrument.name}
                         {sourceOf(t) !== "MANUAL" ? ` · ${SOURCE_LABELS[sourceOf(t)]}` : ""}
@@ -517,7 +525,10 @@ export default function TransactionsPage() {
               {shown.map((t) => (
                 <tr key={t.id} className="border-b last:border-0">
                   <td className="p-3">{formatDate(t.date)}</td>
-                  <td className="p-3">{t.category.name}</td>
+                  <td className="p-3">
+                    {t.category.name}
+                    {t.splitGroupId && <span className="ml-1 rounded bg-brand-50 px-1 text-[10px] font-medium uppercase text-brand-700" title="Part of a bill split by category">split</span>}
+                  </td>
                   <td className="p-3">{t.instrument.name}</td>
                   <td className="p-3 text-gray-500">
                     {t.attachment && (
@@ -573,4 +584,23 @@ export default function TransactionsPage() {
       </div>
     </div>
   );
+}
+
+// The parts of a bill split by category sit together, largest first, where
+// the first of them falls in the list.
+function keepSplitsTogether<T extends { id: string; amount: string; splitGroupId?: string | null }>(list: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const t of list) if (t.splitGroupId) groups.set(t.splitGroupId, [...(groups.get(t.splitGroupId) ?? []), t]);
+  const placed = new Set<string>();
+  const out: T[] = [];
+  for (const t of list) {
+    if (!t.splitGroupId) {
+      out.push(t);
+      continue;
+    }
+    if (placed.has(t.splitGroupId)) continue;
+    placed.add(t.splitGroupId);
+    out.push(...groups.get(t.splitGroupId)!.sort((a, b) => Number(b.amount) - Number(a.amount)));
+  }
+  return out;
 }

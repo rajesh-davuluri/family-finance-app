@@ -25,6 +25,7 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.cardStatement.deleteMany({ where: { instrument: { householdId } } }),
     prisma.importBatch.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
+    prisma.itemCategoryRule.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
     prisma.paymentInstrument.deleteMany({ where: { householdId } }),
     prisma.pendingTelegramTransaction.deleteMany({ where: { householdId } }),
@@ -66,6 +67,8 @@ export async function deleteCategoryCascade(categoryId: string, reassignToCatego
     await prisma.$transaction([
       prisma.transaction.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
       prisma.recurringTemplate.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
+      // Items remembered as this category now belong to the one taking over.
+      prisma.itemCategoryRule.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
       prisma.budget.deleteMany({ where: { categoryId } }),
       prisma.transactionCategory.delete({ where: { id: categoryId } }),
     ]);

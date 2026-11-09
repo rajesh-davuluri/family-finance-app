@@ -19,7 +19,7 @@ export async function loadForDuplicateCheck(householdId: string, fromDate: strin
     },
     orderBy: { createdAt: "asc" },
   });
-  return rows.map((t) => ({
+  const flat = rows.map((t) => ({
     id: t.id,
     date: t.date.toISOString().slice(0, 10),
     amount: Number(t.amount),
@@ -33,7 +33,39 @@ export async function loadForDuplicateCheck(householdId: string, fromDate: strin
     // for showing the match
     categoryName: t.category.name,
     instrumentName: t.instrument.name,
+    splitGroupId: t.splitGroupId,
   }));
+  return mergeSplits(flat);
+}
+
+// The parts of a bill split across categories are one charge: a card
+// statement line of $73.26 matches Groceries $43.77 + Clothing $13.01 +
+// Home $16.48 together, and the parts never look like copies of each other.
+function mergeSplits<T extends { id: string; amount: number; categoryName: string; splitGroupId: string | null }>(rows: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  const out: T[] = [];
+  for (const r of rows) {
+    if (!r.splitGroupId) {
+      out.push(r);
+      continue;
+    }
+    const g = groups.get(r.splitGroupId);
+    if (g) g.push(r);
+    else {
+      const parts = [r];
+      groups.set(r.splitGroupId, parts);
+      out.push(r); // placeholder, replaced below (keeps createdAt order)
+    }
+  }
+  return out.map((r) => {
+    const parts = r.splitGroupId ? groups.get(r.splitGroupId) : null;
+    if (!parts || parts.length < 2) return r;
+    return {
+      ...r,
+      amount: Math.round(parts.reduce((t, p) => t + p.amount, 0) * 100) / 100,
+      categoryName: `Split: ${parts.map((p) => p.categoryName).join(" + ")}`,
+    };
+  });
 }
 
 export type ExistingTxn = Awaited<ReturnType<typeof loadForDuplicateCheck>>[number];

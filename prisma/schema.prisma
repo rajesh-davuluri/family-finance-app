@@ -42,6 +42,7 @@ model Household {
   importBatches ImportBatch[]
   telegramLinks TelegramLink[]
   policies      InsurancePolicy[]
+  itemCategoryRules  ItemCategoryRule[]
   investmentAccounts InvestmentAccount[]
 }
 
@@ -233,6 +234,7 @@ model TransactionCategory {
   transactions Transaction[]
   recurring    RecurringTemplate[]
   budgets      Budget[]
+  itemRules    ItemCategoryRule[]
 
   createdAt DateTime @default(now())
 
@@ -278,9 +280,15 @@ model Transaction {
   // A photo of the bill or receipt, taken with the phone.
   attachment TransactionAttachment?
 
+  // Set on every part of one bill split across categories (a Costco trip:
+  // groceries + clothing + household). The parts add up to the charge, and
+  // duplicate checks treat them as that one charge.
+  splitGroupId String?
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])
+  @@index([splitGroupId])
 }
 
 model RecurringTemplate {
@@ -612,4 +620,20 @@ model TransactionAttachment {
   data          Bytes       @db.VarBinary(Max)
 
   createdAt DateTime @default(now())
+}
+
+// What a receipt item is, as the household corrected it once ("KS ORG
+// STRAWBERRY" -> Groceries, "MENS JOGGER" -> Clothing), so the next bill
+// sorts it the same way. Removed with its category (the only cascade path).
+model ItemCategoryRule {
+  id          String              @id @default(uuid())
+  householdId String
+  household   Household           @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  itemKey     String              @db.NVarChar(100)
+  categoryId  String
+  category    TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([householdId, itemKey])
 }
