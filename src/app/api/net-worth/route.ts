@@ -6,6 +6,8 @@ import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { debtToApproxUsd, convertToDebtCurrency } from "@/lib/debtCalculations";
 import { currentFx, holdingInputs, householdAccounts } from "@/lib/investmentData";
 import { analyze, costHeldAt, toUsd } from "@/lib/investments";
+import { loadCards } from "@/lib/cardData";
+import { calendarDateInZone } from "@/lib/appTimezone";
 
 function monthLabel(d: Date) {
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
@@ -33,7 +35,9 @@ export async function GET() {
   const investmentsCostAt = (d: Date) =>
     holdings.reduce((sum, h) => sum + toUsd(costHeldAt(h.trades, d.toISOString().slice(0, 10)), h.currency, fx), 0);
 
-  const trackedInstruments = instruments.filter((i) => i.openingBalance !== null && i.openingBalanceDate !== null);
+  // Bank and cash balances. Credit cards are counted as what they owe, from
+  // their statements (below), not from an opening balance.
+  const trackedInstruments = instruments.filter((i) => i.type !== "CREDIT_CARD" && i.openingBalance !== null && i.openingBalanceDate !== null);
 
   // --- Current snapshot ---
   const currentInstrumentBalances = await Promise.all(
@@ -53,7 +57,12 @@ export async function GET() {
     const paid = d.payments.reduce((sum, p) => sum + convertToDebtCurrency(Number(p.amount), p.currency, debtInfo(d)), 0);
     return Number(d.originalPrincipal) - paid;
   };
-  const liabilitiesUsd = debts.reduce((sum, d) => sum + debtToApproxUsd(currentDebtBalance(d), d.currency, debtInfo(d).conversionRateToUsd), 0);
+  const loansUsd = debts.reduce((sum, d) => sum + debtToApproxUsd(currentDebtBalance(d), d.currency, debtInfo(d).conversionRateToUsd), 0);
+  // What's owed on credit cards right now (Credit cards page); a card in
+  // credit counts as nothing owed.
+  const cards = await loadCards(user.householdId, calendarDateInZone());
+  const cardsOwedUsd = cards.reduce((sum, c) => sum + toApproxUsd(Math.max(0, c.snapshot.outstanding ?? 0), c.currency), 0);
+  const liabilitiesUsd = loansUsd + cardsOwedUsd;
 
   // --- 6-month trend (end of each of the last 6 months, including now) ---
   const now = new Date();
@@ -75,7 +84,7 @@ export async function GET() {
         .reduce((s, p) => s + convertToDebtCurrency(Number(p.amount), p.currency, debtInfo(d)), 0);
       const balanceAt = Number(d.originalPrincipal) - paidByThen;
       return sum + debtToApproxUsd(balanceAt, d.currency, debtInfo(d).conversionRateToUsd);
-    }, 0);
+    }, 0) + (i === 0 ? cardsOwedUsd : 0); // card balances are known only for now
 
     trend.push({
       month: monthLabel(pointDate),
@@ -90,8 +99,9 @@ export async function GET() {
     cash: Math.round(cashUsd * 100) / 100,
     investments: Math.round(investmentsUsd * 100) / 100,
     liabilities: Math.round(liabilitiesUsd * 100) / 100,
+    cardsOwed: Math.round(cardsOwedUsd * 100) / 100,
     netWorth: Math.round((assetsUsd - liabilitiesUsd) * 100) / 100,
-    untrackedInstrumentCount: instruments.length - trackedInstruments.length,
+    untrackedInstrumentCount: instruments.filter((i) => i.type !== "CREDIT_CARD").length - trackedInstruments.length,
     trend,
   });
 }

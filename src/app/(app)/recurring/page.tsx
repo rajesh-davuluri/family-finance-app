@@ -231,6 +231,7 @@ export default function RecurringPage() {
                   </p>
                   <p className="truncate text-xs text-gray-400">
                     {t.category.name} · {t.instrument.name}
+                    {t.instrument.archived && <span className="text-amber-700"> (archived — not running; move it to another account)</span>}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
@@ -268,7 +269,10 @@ export default function RecurringPage() {
                 <td className="p-3">{formatDate(t.nextRunAt)}</td>
                 <td className="p-3">{FREQ_LABELS[t.frequency] ?? t.frequency}</td>
                 <td className="p-3">{t.category.name}</td>
-                <td className="p-3">{t.instrument.name}</td>
+                <td className="p-3">
+                  {t.instrument.name}
+                  {t.instrument.archived && <span className="block text-xs text-amber-700">archived — not running</span>}
+                </td>
                 <td className="p-3 text-right">
                   {money(Number(t.amount), t.currency)}
                 </td>

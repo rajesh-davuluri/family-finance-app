@@ -26,7 +26,10 @@ export async function GET(req: Request) {
 
   const now = new Date();
   const due = await prisma.recurringTemplate.findMany({
-    where: { active: true, nextRunAt: { lte: now } },
+    // A template on an archived (closed) card or account doesn't run: the
+    // account isn't used any more. It stays, paused in effect, until it's
+    // moved to another account or the account is unarchived.
+    where: { active: true, nextRunAt: { lte: now }, instrument: { archived: false } },
   });
 
   let generated = 0;
