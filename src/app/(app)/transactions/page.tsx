@@ -7,6 +7,7 @@ import DuplicateReview from "@/components/DuplicateReview";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { SOURCE_LABELS, sourceOf } from "@/lib/lastActivity";
 import { money } from "@/lib/money";
+import { RecentActivity } from "@/components/AccountActivity";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
@@ -582,6 +583,7 @@ export default function TransactionsPage() {
           </>
         )}
       </div>
+      <RecentActivity />
     </div>
   );
 }

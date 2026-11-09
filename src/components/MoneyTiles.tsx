@@ -7,6 +7,7 @@ import { money } from "@/lib/money";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot } from "@/lib/cards";
 import MarkCardPaid from "@/components/MarkCardPaid";
+import type { Drill } from "@/components/dashboard/DrillSheet";
 
 // The dashboard's first glance: cash in the bank, and each credit card bill
 // with its due date. Card numbers come from /api/cards (the Credit cards
@@ -16,6 +17,14 @@ type Card = { id: string; name: string; last4: string | null; currency: string; 
 type Instrument = { id: string; name: string; type: string; currency: string; archived: boolean; currentBalance: number | null };
 
 const short = (d: string) => formatDate(d, { month: "short", day: "numeric" });
+
+type PayCycle =
+  | { hasData: false }
+  | {
+      hasData: true;
+      nextPaycheck: { date: string; daysUntil: number };
+      upcomingBills: { id: string; categoryName: string; instrumentName: string; amount: string; currency: string; nextRunAt: string }[];
+    };
 
 function dueWhen(days: number) {
   if (days < 0) return `${-days}d overdue`;
@@ -31,8 +40,9 @@ function rank(c: Card) {
   return s.status === "OVERDUE" ? 0 : s.status === "DUE" ? 1 : s.status === "PAID" ? 2 : 3;
 }
 
-export default function MoneyTiles() {
+export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }) {
   const [cards, setCards] = useState<Card[] | null>(null);
+  const [cycle, setCycle] = useState<PayCycle | null>(null);
   const [banks, setBanks] = useState<Instrument[] | null>(null);
   const [paying, setPaying] = useState<Card | null>(null);
 
@@ -45,6 +55,10 @@ export default function MoneyTiles() {
       .then((r) => (r.ok ? r.json() : []))
       .then((list: Instrument[]) => setBanks(list.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived)))
       .catch(() => setBanks([]));
+    fetch("/api/pay-cycle", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { hasData: false }))
+      .then(setCycle)
+      .catch(() => setCycle({ hasData: false }));
   }, []);
 
   useEffect(() => {
@@ -63,15 +77,45 @@ export default function MoneyTiles() {
   // Bank money by currency, and what's left once the card bills are paid.
   const inBank = new Map<string, number>();
   for (const b of banks) if (b.currentBalance != null) inBank.set(b.currency, (inBank.get(b.currency) ?? 0) + Number(b.currentBalance));
-  const billsBy = new Map<string, number>();
-  for (const c of billCards) billsBy.set(c.currency, (billsBy.get(c.currency) ?? 0) + c.snapshot.leftOnStatement);
   const missingBalance = banks.filter((b) => b.currentBalance == null);
+
+  // Safe to spend until payday (dollars): bank money, less the card
+  // statements due before the next paycheck and the recurring bills paid
+  // from a bank account before then. Bills due after payday come out of it.
+  const payday = cycle?.hasData ? cycle.nextPaycheck.date.slice(0, 10) : null;
+  const usdBanks = banks.filter((b) => b.currency === "USD" && b.currentBalance != null);
+  const safe = (() => {
+    if (!usdBanks.length) return null;
+    const rows: { key: string; label: string; sub?: string; amount: number; currency: string }[] = usdBanks.map((b) => ({
+      key: `bank:${b.id}`,
+      label: b.name,
+      sub: "in the bank now",
+      amount: Number(b.currentBalance),
+      currency: "USD",
+    }));
+    for (const c of billCards) {
+      const s = c.snapshot;
+      if (c.currency !== "USD" || s.leftOnStatement <= 0.005 || !s.statement) continue;
+      if (payday && s.statement.dueDate > payday) continue;
+      rows.push({ key: `card:${c.id}`, label: `${c.name} bill`, sub: `due ${short(s.statement.dueDate)}`, amount: -s.leftOnStatement, currency: "USD" });
+    }
+    if (cycle?.hasData) {
+      const bankNames = new Set(banks.map((b) => b.name));
+      for (const bill of cycle.upcomingBills) {
+        if (bill.currency !== "USD" || !bankNames.has(bill.instrumentName)) continue;
+        rows.push({ key: `bill:${bill.id}`, label: bill.categoryName, sub: `recurring · ${short(bill.nextRunAt.slice(0, 10))} · ${bill.instrumentName}`, amount: -Number(bill.amount), currency: "USD" });
+      }
+    }
+    return { amount: Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100, rows };
+  })();
 
   return (
     <section aria-label="Bank money and card bills" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {/* Money in the bank */}
-      <Link href="/instruments" className="col-span-2 rounded-xl bg-ink-900 p-4 text-white shadow-sm active:opacity-90 lg:row-span-2">
-        <p className="text-xs uppercase tracking-wide text-ink-300">Available in banks</p>
+      <div className="col-span-2 rounded-xl bg-ink-900 p-4 text-white shadow-sm lg:row-span-2">
+        <Link href="/instruments" className="text-xs uppercase tracking-wide text-ink-300 underline-offset-2 hover:underline">
+          Available in banks
+        </Link>
         {inBank.size === 0 ? (
           <p className="mt-2 text-sm text-ink-300">Set a balance on your bank accounts to see it here.</p>
         ) : (
@@ -89,24 +133,26 @@ export default function MoneyTiles() {
             </li>
           ))}
         </ul>
-        {[...billsBy.entries()].some(([, v]) => v > 0.005) && (
-          <div className="mt-3 border-t border-white/15 pt-2 text-sm">
-            {[...billsBy.entries()]
-              .filter(([, v]) => v > 0.005)
-              .map(([cur, bills]) => (
-                <p key={cur} className="flex justify-between gap-3">
-                  <span className="text-ink-300">After card bills ({money(bills, cur)})</span>
-                  <span className={`tabular-nums font-medium ${inBank.has(cur) && inBank.get(cur)! - bills < 0 ? "text-red-300" : ""}`}>
-                    {inBank.has(cur) ? money(inBank.get(cur)! - bills, cur) : "—"}
-                  </span>
-                </p>
-              ))}
-          </div>
+        {safe && (
+          <button
+            onClick={() =>
+              onDrill?.({
+                kind: "list",
+                title: payday ? `Safe to spend until ${short(payday)}` : "After card bills",
+                subtitle: payday ? "Bank money less what's due before payday" : "Bank money less the card bills",
+                rows: safe.rows,
+              })
+            }
+            className="mt-3 flex w-full items-center justify-between gap-3 border-t border-white/15 pt-2 text-left text-sm"
+          >
+            <span className="text-ink-300">{payday ? `Safe to spend until payday (${short(payday)})` : "After card bills"} ›</span>
+            <span className={`font-display text-lg tabular-nums ${safe.amount < 0 ? "text-red-300" : "text-brand-300"}`}>{money(safe.amount, "USD")}</span>
+          </button>
         )}
         {missingBalance.length > 0 && inBank.size > 0 && (
           <p className="mt-2 text-xs text-ink-300">Not counted: {missingBalance.map((b) => b.name).join(", ")} (no balance set)</p>
         )}
-      </Link>
+      </div>
 
       {/* One tile per card bill */}
       {billCards.map((c) => {

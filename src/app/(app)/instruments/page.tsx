@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { AccountFreshness } from "@/components/AccountActivity";
 import AccountDetailsPanel from "@/components/AccountDetailsPanel";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
@@ -500,6 +501,10 @@ export default function InstrumentsPage() {
             </tbody>
           </table>
         </div>
+      </div>
+      <div className="border-t pt-6">
+        <h2 className="mb-2 text-lg font-semibold">Last activity on each account</h2>
+        <AccountFreshness />
       </div>
     </div>
   );

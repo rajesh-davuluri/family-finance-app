@@ -25,6 +25,9 @@ function summarize(transactions: Txn[]) {
   let income = 0;
   let expense = 0;
   let savings = 0;
+  // Bills and loan instalments (rent, EMIs, utilities): paid once a month,
+  // so a month's pace projects only the rest.
+  let fixed = 0;
   const expenseTotals = new Map<string, { name: string; total: number }>();
   const incomeTotals = new Map<string, { name: string; total: number }>();
   const instrumentTotals = new Map<string, { name: string; total: number }>();
@@ -39,6 +42,7 @@ function summarize(transactions: Txn[]) {
     income += flow.income;
     expense += flow.spending;
     savings += flow.savings;
+    if (kind === "BILL" || kind === "DEBT_PAYMENT") fixed += flow.spending;
     if (kind === "INCOME") add(incomeTotals, t.category.id, t.category.name, usd);
     if (countsAsSpending(kind)) {
       add(expenseTotals, t.category.id, t.category.name, flow.spending);
@@ -58,6 +62,7 @@ function summarize(transactions: Txn[]) {
     expense: Math.round(expense * 100) / 100,
     net: Math.round((income - expense) * 100) / 100,
     savings: Math.round(savings * 100) / 100,
+    fixed: Math.round(fixed * 100) / 100,
     expenseBreakdown: toSortedArray(expenseTotals),
     incomeBreakdown: toSortedArray(incomeTotals),
     instrumentBreakdown: toSortedArray(instrumentTotals),
