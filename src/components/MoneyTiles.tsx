@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/formatDate";
 import { money } from "@/lib/money";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot } from "@/lib/cards";
+import MarkCardPaid from "@/components/MarkCardPaid";
 
 // The dashboard's first glance: cash in the bank, and each credit card bill
 // with its due date. Card numbers come from /api/cards (the Credit cards
@@ -33,6 +34,7 @@ function rank(c: Card) {
 export default function MoneyTiles() {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [banks, setBanks] = useState<Instrument[] | null>(null);
+  const [paying, setPaying] = useState<Card | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/cards", { cache: "no-store" })
@@ -113,11 +115,12 @@ export default function MoneyTiles() {
         const paid = s.status === "PAID" || s.status === "NOTHING_DUE";
         const urgent = s.status === "OVERDUE" || (s.status === "DUE" && (s.daysToDue ?? 99) <= 5);
         return (
-          <Link
+          <div
             key={c.id}
-            href="/cards"
-            className={`rounded-xl border bg-white p-3 shadow-sm active:bg-gray-50 ${s.status === "OVERDUE" ? "border-expense-500" : urgent ? "border-amber-400" : ""}`}
+            className={`relative flex flex-col rounded-xl border bg-white p-3 shadow-sm ${s.status === "OVERDUE" ? "border-expense-500" : urgent ? "border-amber-400" : ""}`}
           >
+            {/* The whole tile opens Credit cards; the button sits above the link. */}
+            <Link href="/cards" className="absolute inset-0 rounded-xl active:bg-gray-50/60" aria-label={`${c.name} on Credit cards`} />
             <p className="truncate text-xs text-gray-500">
               {c.name}
               {c.last4 && <span className="text-gray-400"> ••{c.last4}</span>}
@@ -142,7 +145,15 @@ export default function MoneyTiles() {
               </>
             )}
             {st.basis === "ESTIMATED" && <p className="mt-0.5 text-[11px] text-gray-400">estimated</p>}
-          </Link>
+            {!paid && (
+              <button
+                onClick={() => setPaying(c)}
+                className="relative mt-2 self-start rounded-md border border-brand-400 px-2.5 py-1 text-xs font-medium text-brand-700 active:bg-brand-50"
+              >
+                Mark paid
+              </button>
+            )}
+          </div>
         );
       })}
 
@@ -155,6 +166,16 @@ export default function MoneyTiles() {
         <Link href="/cards" className="col-span-2 self-center px-1 text-xs text-gray-500 underline lg:col-span-2">
           {notSetUp} more card{notSetUp === 1 ? "" : "s"} not set up yet
         </Link>
+      )}
+      {paying && (
+        <MarkCardPaid
+          card={paying}
+          onClose={() => setPaying(null)}
+          onDone={() => {
+            setPaying(null);
+            load();
+          }}
+        />
       )}
     </section>
   );

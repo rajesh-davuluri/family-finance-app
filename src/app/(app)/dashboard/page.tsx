@@ -10,6 +10,7 @@ import CollapsibleSection from "@/components/CollapsibleSection";
 import SpendingByMonth from "@/components/SpendingByMonth";
 import PayCycleCard from "@/components/PayCycleCard";
 import MoneyTiles from "@/components/MoneyTiles";
+import SpendTiles from "@/components/SpendTiles";
 import { formatDate } from "@/lib/formatDate";
 import { LastActivity, SOURCE_LABELS, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 
@@ -337,6 +338,8 @@ export default function DashboardPage() {
       </div>
 
       <MoneyTiles />
+
+      <SpendTiles />
 
       <PayCycleCard refreshKey={payCycleRefresh} />
 
