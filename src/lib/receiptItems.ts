@@ -9,10 +9,19 @@ export type ItemKind = "GROCERIES" | "FOOD" | "CLOTHING" | "HOME" | "PERSONAL_CA
 // Lines that carry money but aren't items.
 const NOT_ITEM =
   /sub\s*-?\s*total|\btotal\b|\btax(es)?\b|\b[cs]?gst\b|\bvat\b|\bchange\b|\bbalance\b|\bcash\b|\btender|\bvisa\b|\bmaster\s*card\b|\bamex\b|\bdiscover\b|\bdebit\b|\bcredit\b|\bpayment\b|\bapproved\b|\bauth\b|\bitems?\s*sold\b|\bnumber of items\b|\bmember\b|\bsav(ed|ings)\s*(today|total)?\s*$|\byou saved\b|\brebate\b|\bpoints?\b|\brewards?\b|\bref\s*#|\btran(s|saction)\b|\bacct\b|\bterminal\b|\bchip\b|\bpurchase\b|\bamount\b/i;
-const PRICE = /(\d{1,5}\.\d{2})\s*(-)?\s*[A-Z]{0,2}\s*$/;
+// The price at the end of an item line -- "$2.50", "22.99 A", "4.00-A" --
+// allowing a few stray characters after it, which photos of receipts on a
+// patterned counter often add ("$6.54 :", "$13.98 -").
+const PRICE = /\$?\s?(\d{1,5}\.\d{2})\s*(-)?\s*[A-Z]{0,2}(?:\s+\S{1,3})?\s*$/;
 
 function cleanName(raw: string): { name: string; code: string | null } {
-  let s = raw.replace(/\s+/g, " ").trim();
+  // Stray marks at the start ("| ", "' ", "{ ") from the photo's edges.
+  let s = raw.replace(/\s+/g, " ").trim().replace(/^[^A-Za-z0-9/$]+/, "");
+  // A quantity or weight before the name: "1 FS ...", "2 FS ...", "1.64 FS ...".
+  s = s.replace(/^\d{1,2}(\.\d{1,3})?\s+(?=[A-Za-z])/, "");
+  // Indian grocers' department codes: "FS AHA KARAPUSA", "FK METHI THEPLA" --
+  // with any 1-2 letter smudge read in front of them ("Br FS POMEGRANATE").
+  s = s.replace(/^(?:[A-Za-z]{1,2}\s+)?(?:\d{1,2}(?:\.\d{1,3})?\s+)?(FS|FK|FZ|FR|GR|PR|DY|BK)\s+(?=[A-Za-z])/, "");
   // Costco's "E " (eligible) flag and leading item numbers; Walmart's UPCs.
   s = s.replace(/^[A-Z]\s+(?=\d)/, "");
   const code = s.match(/^\/?\s*(\d{4,})\b/)?.[1] ?? null;
@@ -27,7 +36,8 @@ export function parseReceiptItems(text: string): ReceiptItem[] {
     const m = line.match(PRICE);
     if (!m) continue;
     const before = line.slice(0, m.index).trim();
-    if (NOT_ITEM.test(before)) continue;
+    // Also with spaces removed: OCR splits words ("Subt otal", "TO TAL").
+    if (NOT_ITEM.test(before) || NOT_ITEM.test(before.replace(/\s+/g, ""))) continue;
     // "2 @ 3.49", "1.23 lb @ 0.58/lb": the price line for the item above.
     if (/@/.test(before) && !/[a-z]{3,}/i.test(before.replace(/\b(lb|lbs|kg|ea|oz)\b/gi, ""))) continue;
     const amount = Number(m[1]);
@@ -57,7 +67,7 @@ const KINDS: [ItemKind, RegExp][] = [
   ["GAS", K("unleaded|premium gas|regular gas|diesel|gasoline|fuel|pump\\s*#?\\d")],
   ["FOOD", K("food court|hot dog|pizza slice|whole pizza|chicken bake|churro|soda fountain|fountain drink|frozen yogurt|sundae|acai bowl|combo meal|meal deal|cafe|coffee drink|latte|frappuccino|smoothie bowl")],
   ["SHOPPING", K("tv\\b|television|laptop|ipad|iphone|tablet|headphone|airpods|earbud|speaker|charger|cable|hdmi|usb|printer|ink\\b|toner|camera|monitor|keyboard|mouse\\b|router|game|playstation|xbox|nintendo|toy|lego|book|gift card|card\\b|wrapping|stationery|pen\\b|pens\\b|notebook|backpack|luggage|suitcase|tool|drill|garden hose|furniture|chair|table\\b|lamp|rug\\b|mattress|appliance|blender|instant pot|air fryer")],
-  ["GROCERIES", K("banana|apple|orange|mandarin|clementine|grape|berr|strawb|strwb|blueb|blub|raspb|blackb|cherr|mango|pineapple|kiwi|melon|watermelon|peach|pear|plum|lemon|lime|avocado|tomato|onion|potato|garlic|ginger|carrot|broccoli|cauliflower|spinach|lettuce|salad|cucumber|pepper|capsicum|okra|bhindi|eggplant|brinjal|cabbage|celery|corn|beans|peas|cilantro|coriander|mint|methi|produce|organic|\\borg\\b|fruit|veg|milk|eggs?\\b|cheese|yogurt|yoghurt|curd|paneer|butter|ghee|cream|dahi|bread|bagel|tortilla|naan|roti|chapati|rice|basmati|atta|flour|maida|sooji|rava|dal\\b|lentil|toor|moong|urad|chana|rajma|besan|poha|oats|cereal|granola|pasta|noodle|maggi|sugar|jaggery|salt|spice|masala|turmeric|haldi|chilli|chili|cumin|jeera|mustard|oil\\b|olive|canola|sunflower|chicken|chkn|beef|pork|lamb|mutton|goat|fish|salmon|shrimp|prawn|tuna|turkey|bacon|sausage|meat|tofu|frozen|ice cream|juice|water\\b|sparkling|soda|coke|pepsi|sprite|tea\\b|chai|coffee|k-?cup|honey|jam|peanut butter|nutella|ketchup|sauce|pickle|achar|chutney|soup|broth|snack|chip|crisps|cracker|cookie|biscuit|chocolate|candy|gummies|nuts|almond|cashew|pistachio|walnut|peanut|trail mix|popcorn|pretzel|granola bar|protein bar|kirkland signature|\\bks\\b|great value|\\bgv\\b|marketside|good & gather|haldiram|mtr\\b|deep\\b|laxmi|swad")],
+  ["GROCERIES", K("banana|apple|orange|mandarin|clementine|grape|berr|strawb|strwb|blueb|blub|raspb|blackb|cherr|mango|pineapple|kiwi|melon|watermelon|peach|pear|plum|lemon|lime|avocado|tomato|onion|potato|garlic|ginger|carrot|broccoli|cauliflower|spinach|lettuce|salad|cucumber|pepper|capsicum|okra|bhindi|eggplant|brinjal|cabbage|celery|corn|beans|peas|cilantro|coriander|mint|methi|produce|organic|\\borg\\b|fruit|veg|milk|eggs?\\b|cheese|yogurt|yoghurt|curd|paneer|butter|ghee|cream|dahi|bread|bagel|tortilla|naan|roti|chapati|rice|basmati|atta|flour|maida|sooji|rava|dal\\b|lentil|toor|moong|urad|chana|rajma|besan|poha|oats|cereal|granola|pasta|noodle|maggi|sugar|jaggery|salt|spice|masala|turmeric|haldi|chilli|chili|cumin|jeera|mustard|oil\\b|olive|canola|sunflower|chicken|chkn|beef|pork|lamb|mutton|goat|fish|salmon|shrimp|prawn|tuna|turkey|bacon|sausage|meat|tofu|frozen|ice cream|juice|water\\b|sparkling|soda|coke|pepsi|sprite|tea\\b|chai|coffee|k-?cup|honey|jam|peanut butter|nutella|ketchup|sauce|pickle|achar|chutney|soup|broth|snack|chip|crisps|cracker|cookie|biscuit|chocolate|candy|gummies|nuts|almond|cashew|pistachio|walnut|peanut|trail mix|popcorn|pretzel|granola bar|protein bar|kirkland signature|\\bks\\b|great value|\\bgv\\b|marketside|good & gather|haldiram|mtr\\b|deep\\b|laxmi|swad|pomegranate|guava|papaya|chikoo|sapota|jackfruit|curry leaves|drumstick|tindora|karela|bottle gourd|lauki|ridge gourd|phulka|paratha|parotta|thepla|kulcha|puri|idli|dosa batter|batter|karapusa|kara boondi|boondi|mixture|murukku|chakli|chekkalu|namkeen|bhujia|sev\\b|khakhra|papad|appalam|aha\\b|frozen paratha|ghee|pickle")],
 ];
 
 export function classifyItem(name: string): ItemKind | null {
