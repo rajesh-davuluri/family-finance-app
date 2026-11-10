@@ -3,6 +3,7 @@
 // be read), and turn the text into a transaction guess. Browser-only.
 
 import { parseReceipt, type ReceiptGuess } from "@/lib/receiptParse";
+import { findReceipt, grayStretch, readingSize } from "@/lib/receiptImage";
 
 const MAX_SIDE = 1600; // enough for text recognition, a few hundred KB as JPEG
 
@@ -26,6 +27,45 @@ export async function shrinkPhoto(file: File): Promise<Blob> {
     return await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("couldn't encode the photo"))), "image/jpeg", 0.82),
     );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// The photo made ready to read: cropped to the receipt (so the table or
+// counter around it isn't read as text), enlarged and in high contrast.
+// See src/lib/receiptImage.ts.
+export async function photoForReading(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const W = img.naturalWidth, H = img.naturalHeight;
+    // Look for the receipt in a small copy.
+    const sw = 300, sh = Math.round((H * sw) / W);
+    const small = document.createElement("canvas");
+    small.width = sw;
+    small.height = sh;
+    const sctx = small.getContext("2d");
+    if (!sctx) throw new Error("no canvas");
+    sctx.drawImage(img, 0, 0, sw, sh);
+    const found = findReceipt(sctx.getImageData(0, 0, sw, sh).data, sw, sh);
+    const k = W / sw;
+    const box = found ? { x: found.x * k, y: found.y * k, w: Math.min(W, found.w * k), h: Math.min(H, found.h * k) } : { x: 0, y: 0, w: W, h: H };
+    const size = readingSize(box);
+    const canvas = document.createElement("canvas");
+    canvas.width = size.w;
+    canvas.height = size.h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no canvas");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, size.w, size.h);
+    ctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, size.w, size.h);
+    const pixels = ctx.getImageData(0, 0, size.w, size.h);
+    grayStretch(pixels.data);
+    ctx.putImageData(pixels, 0, 0);
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("couldn't prepare the photo"))), "image/png"));
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -70,12 +110,13 @@ export async function scanBill(
   progress?: (stage: "preparing" | "loading" | "reading", fraction: number) => void,
 ): Promise<ScanResult> {
   progress?.("preparing", 0);
-  const photo = await shrinkPhoto(file);
+  // Kept with the transaction: the whole photo, small. Read: the receipt, cropped and enlarged.
+  const [photo, forReading] = await Promise.all([shrinkPhoto(file), photoForReading(file)]);
   progress?.("loading", 0);
   onProgress = (p) => progress?.("reading", p);
   const worker = await getWorker();
   progress?.("reading", 0);
-  const { data } = await worker.recognize(photo);
+  const { data } = await worker.recognize(forReading);
   onProgress = null;
   return { photo, text: data.text, guess: parseReceipt(data.text, today) };
 }

@@ -68,6 +68,17 @@ function pickAmount(lines: string[]): { amount: number | null; line: string | nu
       best = { score: word.score, value, index, line: used.trim() };
     }
   });
+  // No clear "total" label (it was garbled): the amount repeated on the
+  // payment lines ("Credit $33.74", "CARD PURCHASE $33.74") is the charge.
+  if (best && (best as { score: number }).score < 3) {
+    const counts = new Map<number, { n: number; line: string }>();
+    lines.forEach((line) => {
+      if (NOT_TOTAL.test(line) || !TOTAL_WORDS.some((w) => w.re.test(line))) return;
+      for (const a of amountsIn(line)) counts.set(a.value, { n: (counts.get(a.value)?.n ?? 0) + 1, line: line.trim() });
+    });
+    const repeated = [...counts.entries()].filter(([, v]) => v.n >= 2).sort((a, b) => b[1].n - a[1].n || b[0] - a[0])[0];
+    if (repeated) return { amount: repeated[0], line: repeated[1].line };
+  }
   if (best) return { amount: (best as { value: number }).value, line: (best as { line: string }).line };
 
   // No labelled total: the largest amount with cents or a currency mark.
@@ -139,7 +150,15 @@ const NOT_MERCHANT =
 const ADDRESS = /^\d+\s+\w+.*\b(st|street|ave|avenue|rd|road|blvd|dr|drive|ln|lane|hwy|pkwy|way|ct|plaza|nagar|marg|colony)\b/i;
 
 function tidyName(s: string): string {
-  const t = s.replace(/[^A-Za-z0-9&'.\- ]+/g, " ").replace(/\s+/g, " ").trim().replace(/^[-.' ]+|[-.' ]+$/g, "");
+  const t = s
+    .replace(/[^A-Za-z0-9&'.\- ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[-.' ]+|[-.' ]+$/g, "")
+    // Smudges read beside the name ("Royal Bazaar Farmers Market a -").
+    .replace(/^(?:[A-Za-z]{1,2}\s+)+(?=[A-Za-z]{3})/, "")
+    .replace(/(?:\s+[A-Za-z]{1,2})+$/, "")
+    .replace(/^[-.' ]+|[-.' ]+$/g, "");
   // "COSTCO WHOLESALE" -> "Costco Wholesale"; keep mixed case as printed.
   return t === t.toUpperCase() ? t.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()) : t;
 }
@@ -150,6 +169,11 @@ function pickMerchant(lines: string[]): string | null {
     if (letters < 3 || letters < line.replace(/\s/g, "").length * 0.6) continue; // mostly digits or noise
     if (NOT_MERCHANT.test(line) || ADDRESS.test(line)) continue;
     if (amountsIn(line).length) continue;
+    // Noise read off the background ("a ay re Ri a"): mostly 1-2 letter bits,
+    // with no real word in it.
+    const words = line.split(/\s+/).filter((w) => /[a-z]/i.test(w));
+    const short = words.filter((w) => w.replace(/[^a-z]/gi, "").length <= 2).length;
+    if (!words.some((w) => w.replace(/[^a-z]/gi, "").length >= 4) || short / words.length > 0.4) continue;
     const name = tidyName(line);
     if (name.length >= 3) return name.slice(0, 60);
   }
