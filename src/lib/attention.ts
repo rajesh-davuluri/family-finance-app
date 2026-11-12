@@ -17,8 +17,22 @@ export function attentionItems(input: {
   cardBillsUsd: number;
   likelyDuplicates: number;
   stale: { name: string; lastDate: string; days: number }[];
+  // The payday planner's first dip under the cushion in the next 30 days
+  // (src/lib/cashPlan.ts); when the planner ran, it replaces the rougher
+  // "banks short of the card bills" check.
+  cashPlan?: { ran: boolean; tight: { start: string; lowest: number; lowestDate: string; under: number; cause: string | null; actBy: string; actByDays: number; daysAway: number } | null };
 }): AttentionItem[] {
   const items: AttentionItem[] = [];
+  const t = input.cashPlan?.tight;
+  if (t) {
+    const when = (d: string, days: number) => (days <= 0 ? "today" : days === 1 ? "tomorrow" : `on ${new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`);
+    items.push({
+      key: "cash-tight",
+      level: t.daysAway <= 7 ? "high" : "medium",
+      text: `Cash may drop to ${t.lowest < 0 ? "−" : ""}${fmt(t.lowest)} ${when(t.lowestDate, t.daysAway)}${t.cause ? ` after the ${t.cause}` : ""}, ${fmt(t.under)} under your cushion. Act ${t.actByDays <= 0 ? "today" : `by ${when(t.actBy, t.actByDays).replace(/^on /, "")}`}`,
+      href: "/plan",
+    });
+  }
   for (const c of input.cards) {
     if (c.leftOnStatement <= 0.005 || c.daysToDue == null || c.daysToDue > 5) continue;
     items.push({
@@ -28,7 +42,7 @@ export function attentionItems(input: {
       href: "/cards",
     });
   }
-  if (input.bankUsd != null && input.cardBillsUsd > 0.005 && input.bankUsd < input.cardBillsUsd) {
+  if (!input.cashPlan?.ran && input.bankUsd != null && input.cardBillsUsd > 0.005 && input.bankUsd < input.cardBillsUsd) {
     items.push({
       key: "short",
       level: "high",

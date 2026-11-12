@@ -8,6 +8,8 @@ import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { loadForDuplicateCheck, pairKey, settledPairs } from "@/lib/duplicateData";
 import { findPairs } from "@/lib/duplicates";
 import { attentionItems } from "@/lib/attention";
+import { loadCashPlanInputs } from "@/lib/cashPlanData";
+import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
 
 // The dashboard's "Needs attention" strip.
 
@@ -64,6 +66,24 @@ export async function GET() {
     .filter((x) => x.days >= STALE_DAYS && x.days <= DORMANT_DAYS)
     .sort((a, b) => b.days - a.days);
 
+  // Payday planner: the first day cash dips under the cushion.
+  let plan: { ran: boolean; tight: { start: string; lowest: number; lowestDate: string; under: number; cause: string | null; actBy: string; actByDays: number; daysAway: number } | null } | undefined;
+  if (bankUsd != null) {
+    const [inputs, household] = await Promise.all([
+      loadCashPlanInputs(householdId, today),
+      prisma.household.findUnique({ where: { id: householdId }, select: { cashCushionUsd: true } }),
+    ]);
+    const cushionUsd = household?.cashCushionUsd != null ? Number(household.cashCushionUsd) : DEFAULT_CUSHION_USD;
+    const p = cashPlan({ ...inputs, cushionUsd, days: inputs.windowDays });
+    const first = p.tight[0];
+    plan = {
+      ran: true,
+      tight: first
+        ? { start: first.start, lowest: first.lowest, lowestDate: first.lowestDate, under: first.under, cause: first.causes[0]?.label ?? null, actBy: first.actBy, actByDays: daysBetween(today, first.actBy), daysAway: daysBetween(today, first.lowestDate) }
+        : null,
+    };
+  }
+
   const items = attentionItems({
     cards: cards.map((c) => ({ name: c.name, currency: c.currency, leftOnStatement: c.snapshot.leftOnStatement, daysToDue: c.snapshot.daysToDue })),
     budgets: budgets.map((b) => ({ name: b.category.name, limit: Number(b.monthlyLimit), spent: spent.get(b.categoryId) ?? 0 })),
@@ -71,6 +91,7 @@ export async function GET() {
     cardBillsUsd,
     likelyDuplicates,
     stale,
+    cashPlan: plan,
   });
   return NextResponse.json({ items });
 }
