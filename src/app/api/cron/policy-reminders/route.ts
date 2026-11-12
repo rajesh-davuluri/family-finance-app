@@ -5,6 +5,8 @@ import { REMINDER_DAYS, daysBetween, reminderText } from "@/lib/policies";
 import { sendMessage, telegramConfigured } from "@/lib/telegram";
 import { loadCards } from "@/lib/cardData";
 import { cardReminder } from "@/lib/cards";
+import { budgetAlert } from "@/lib/budgets";
+import { toApproxUsd } from "@/lib/fx";
 
 // Runs once a day (vercel.json). For every active policy whose premium is
 // due in 15, 7 or 2 days or today, and every credit card statement still
@@ -68,7 +70,8 @@ export async function GET(req: Request) {
   }
 
   const cardReminders = await remindCards(today);
-  return NextResponse.json({ checked: due.length, reminders, cardReminders });
+  const budgetAlerts = await remindBudgets(today);
+  return NextResponse.json({ checked: due.length, reminders, cardReminders, budgetAlerts });
 }
 
 async function tell(householdId: string, message: string, icon: string) {
@@ -93,6 +96,45 @@ async function remindCards(today: string) {
       const message = cardReminder(card, card.snapshot);
       if (!message) continue;
       await tell(householdId, message, "💳");
+      sent++;
+    }
+  }
+  return sent;
+}
+
+// Budgets: an alert at 80% of a monthly limit and another once it's over,
+// each once a month. Spending is counted as on the Budgets page.
+async function remindBudgets(today: string) {
+  const month = today.slice(0, 7);
+  const y = Number(today.slice(0, 4));
+  const m = Number(today.slice(5, 7));
+  const daysLeft = new Date(Date.UTC(y, m, 0)).getUTCDate() - Number(today.slice(8, 10));
+  const monthStart = new Date(`${month}-01T00:00:00Z`);
+  const budgets = await prisma.budget.findMany({ include: { category: { select: { name: true } } } });
+  let sent = 0;
+  for (const householdId of new Set(budgets.map((b) => b.householdId))) {
+    const txns = await prisma.transaction.findMany({
+      where: { householdId, date: { gte: monthStart }, category: { direction: "EXPENSE" } },
+      select: { categoryId: true, amount: true, currency: true },
+    });
+    const spent = new Map<string, number>();
+    for (const t of txns) spent.set(t.categoryId, (spent.get(t.categoryId) ?? 0) + toApproxUsd(Number(t.amount), t.currency));
+    for (const b of budgets.filter((x) => x.householdId === householdId)) {
+      const alert = budgetAlert({
+        name: b.category.name,
+        limit: Number(b.monthlyLimit),
+        spent: spent.get(b.categoryId) ?? 0,
+        month,
+        alertedNear: b.alertedNearMonth,
+        alertedOver: b.alertedOverMonth,
+        daysLeft,
+      });
+      if (!alert) continue;
+      await tell(householdId, alert.text, alert.level === "over" ? "🚨" : "⚠️");
+      await prisma.budget.update({
+        where: { id: b.id },
+        data: alert.level === "over" ? { alertedOverMonth: month } : { alertedNearMonth: month },
+      });
       sent++;
     }
   }

@@ -6,13 +6,14 @@ import { money } from "@/lib/money";
 import { getTodayLocal } from "@/lib/formatDate";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { Drill, Slice } from "@/components/dashboard/DrillSheet";
+import { ChangeBadge, DailySpendLine, IncomeSplitGauge } from "@/components/dashboard/Insights";
 
 // "Am I on track?" and "Where is the money going?": income, spending and
 // what's kept for this month, last month or this year; the month's pace
 // against the usual; the biggest categories with their budgets; and twelve
 // months of income against spending. Every number opens what's behind it.
 
-type Summary = { income: number; expense: number; net: number; savings: number; fixed?: number; expenseBreakdown: Slice[]; incomeBreakdown: Slice[] };
+type Summary = { income: number; expense: number; net: number; savings: number; fixed?: number; needs?: number; expenseBreakdown: Slice[]; incomeBreakdown: Slice[] };
 type SummaryResponse = { month: number; year: number; monthly: Summary; ytd: Summary; monthRange: { from: string; to: string }; ytdRange: { from: string; to: string } };
 type Month = { year: number; month: number; isCurrent: boolean; spent: number; income: number };
 type Budget = { categoryId: string; monthlyLimit: string; spent: number };
@@ -28,6 +29,9 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
   const [last, setLast] = useState<SummaryResponse | null>(null);
   const [months, setMonths] = useState<Month[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  // Last month up to the same day, for the "vs last month" badges, and spending by day.
+  const [lastToDate, setLastToDate] = useState<SummaryResponse | null>(null);
+  const [daily, setDaily] = useState<{ daysInMonth: number; thisMonth: number[]; lastMonth: number[] } | null>(null);
 
   useEffect(() => {
     try {
@@ -57,6 +61,8 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
     get(`/api/dashboard/summary?month=${pm}&year=${py}`).then(setLast).catch(() => setLast(null));
     get("/api/dashboard/monthly-spending?months=13").then((j) => setMonths(j?.months ?? [])).catch(() => setMonths([]));
     get("/api/budgets").then((j) => setBudgets(Array.isArray(j) ? j : [])).catch(() => setBudgets([]));
+    get(`/api/dashboard/summary?month=${pm}&year=${py}&upto=${Number(today.slice(8, 10))}`).then(setLastToDate).catch(() => setLastToDate(null));
+    get("/api/dashboard/daily-spend").then(setDaily).catch(() => setDaily(null));
   }, []);
   useEffect(() => {
     load();
@@ -74,6 +80,8 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
   if (!cur || !view) return <div className="h-64 animate-pulse rounded-xl bg-white/60" aria-hidden />;
   const { s, range } = view;
   const kept = Math.round((s.income - s.expense) * 100) / 100;
+  // Badges only for this month, against last month by the same day.
+  const before = period === "month" ? lastToDate?.monthly : null;
   const rate = s.income > 0 ? Math.round((kept / s.income) * 100) : null;
 
   // Pace: this month's spending projected to month end, against the average
@@ -133,6 +141,7 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
           >
             <span className="block text-xs text-gray-500">Income ›</span>
             <span className="font-display block text-xl tabular-nums text-income-600 sm:text-2xl">{usd(s.income)}</span>
+            <ChangeBadge now={s.income} before={before?.income} upIsGood />
           </button>
           <button
             onClick={() => onDrill({ kind: "categories", title: "Spent", subtitle: view.label, from: range.from, to: range.to, items: s.expenseBreakdown })}
@@ -140,16 +149,21 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
           >
             <span className="block text-xs text-gray-500">Spent ›</span>
             <span className="font-display block text-xl tabular-nums sm:text-2xl">{usd(s.expense)}</span>
+            <ChangeBadge now={s.expense} before={before?.expense} upIsGood={false} />
           </button>
           <div className="rounded-lg bg-paper px-3 py-2.5">
             <span className="block text-xs text-gray-500">Kept{rate != null ? ` · ${rate}%` : ""}</span>
             <span className={`font-display block text-xl tabular-nums sm:text-2xl ${kept < 0 ? "text-expense-600" : ""}`}>{usd(kept)}</span>
+            <ChangeBadge now={kept} before={before ? before.income - before.expense : null} upIsGood />
           </div>
         </div>
         <p className="mt-2 text-xs text-gray-500">
           {s.savings > 0.5 && <>{usd(s.savings)} of it went to savings and investments. </>}
           {rate != null && (rate >= 20 ? "A healthy share kept." : rate >= 0 ? "Aim to keep 20% or more of income." : "Spending is above income.")}
+          {before && " Badges compare with last month by the same day."}
         </p>
+
+        <IncomeSplitGauge income={s.income} needs={s.needs ?? 0} spent={s.expense} />
 
         {pace && (
           <p className={`mt-3 rounded-lg px-3 py-2 text-sm ${pace.diff > pace.avg * 0.1 ? "bg-red-50 text-expense-600" : pace.diff < -pace.avg * 0.1 ? "bg-green-50 text-income-600" : "bg-gray-50 text-gray-700"}`}>
@@ -159,6 +173,8 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
             {fixed > 0.5 && <span className="block text-xs opacity-80">Bills and EMIs ({usd(fixed)}) counted once; everyday spending projected at its pace so far.</span>}
           </p>
         )}
+
+        {period === "month" && daily && <DailySpendLine thisMonth={daily.thisMonth} lastMonth={daily.lastMonth} daysInMonth={daily.daysInMonth} />}
 
         <div className="mt-4">
           <div className="mb-1 flex items-baseline justify-between">

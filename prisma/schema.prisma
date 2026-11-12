@@ -378,6 +378,11 @@ model Budget {
   categoryId String
   category   TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // The month ("2026-11") of the last 80% / over-budget alert, so each is
+  // sent once a month.
+  alertedNearMonth String? @db.NVarChar(7)
+  alertedOverMonth String? @db.NVarChar(7)
+
   createdAt DateTime @default(now())
 
   // One standing monthly limit per category per household -- creating a
