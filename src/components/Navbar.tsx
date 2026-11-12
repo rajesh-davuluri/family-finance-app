@@ -14,6 +14,7 @@ import { announceTransactionsChanged } from "@/lib/events";
 const primaryLinks = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/paychecks", label: "Paychecks" },
+  { href: "/plan", label: "Planner" },
   { href: "/transactions", label: "Transactions" },
   { href: "/budgets", label: "Budgets" },
   { href: "/debts", label: "Debts" },
@@ -41,6 +42,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
   {
     title: "Money this month",
     links: [
+      { href: "/plan", label: "Payday planner", hint: "Safe to spend, next 30 days, what ifs" },
       { href: "/cards", label: "Credit cards", hint: "Statements, due dates, owed now" },
       { href: "/budgets", label: "Budgets", hint: "Limits by category" },
       { href: "/recurring", label: "Recurring bills", hint: "Rent, EMIs, subscriptions" },

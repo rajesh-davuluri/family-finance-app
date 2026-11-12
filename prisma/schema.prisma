@@ -35,6 +35,10 @@ model Household {
   emergencyFundUsd     Decimal? @db.Decimal(12, 2)
   emergencyTargetMonths Int      @default(6)
 
+  // Payday planner: the least the bank accounts should hold. A day the
+  // forecast dips under it is flagged as tight.
+  cashCushionUsd Decimal? @db.Decimal(12, 2)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
