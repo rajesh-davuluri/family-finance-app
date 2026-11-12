@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SmartBudgets from "@/components/SmartBudgets";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Budget = {
@@ -21,8 +22,9 @@ export default function BudgetsPage() {
   const [form, setForm] = useState({ categoryId: "", monthlyLimit: "" });
   const [submitting, setSubmitting] = useState(false);
 
+  // Reloads in place (no "Loading..." after the first time), so the
+  // suggestions panel keeps its "saved" message.
   async function load() {
-    setLoading(true);
     const [budgetsRes, catsRes] = await Promise.all([fetch("/api/budgets"), fetch("/api/categories")]);
     setBudgets(await budgetsRes.json());
     const cats: Category[] = await catsRes.json();
@@ -74,6 +76,8 @@ export default function BudgetsPage() {
         <h1 className="text-xl font-semibold">Budgets</h1>
         <p className="text-sm text-gray-500">Monthly limits per category, tracked in approx. USD — {MONTH_NAME}</p>
       </div>
+
+      <SmartBudgets onSaved={load} />
 
       {availableCategories.length > 0 && (
         <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-lg border bg-white p-4 sm:flex-row">

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
 import { countsAsSpending, flowOf, kindOf } from "@/lib/categoryKind";
+import { isEssential } from "@/lib/emergencyFund";
 
 // Powers the dashboard: a month/year-selectable monthly summary, a
 // year-to-date summary for the same year, an expense/income-by-category
@@ -28,6 +29,9 @@ function summarize(transactions: Txn[]) {
   // Bills and loan instalments (rent, EMIs, utilities): paid once a month,
   // so a month's pace projects only the rest.
   let fixed = 0;
+  // Needs (rent, EMIs, bills, groceries, gas, medical...) for the 50/30/20 view;
+  // the rest of spending is wants.
+  let needs = 0;
   const expenseTotals = new Map<string, { name: string; total: number }>();
   const incomeTotals = new Map<string, { name: string; total: number }>();
   const instrumentTotals = new Map<string, { name: string; total: number }>();
@@ -43,6 +47,7 @@ function summarize(transactions: Txn[]) {
     expense += flow.spending;
     savings += flow.savings;
     if (kind === "BILL" || kind === "DEBT_PAYMENT") fixed += flow.spending;
+    if (countsAsSpending(kind) && isEssential(kind, t.category.name)) needs += flow.spending;
     if (kind === "INCOME") add(incomeTotals, t.category.id, t.category.name, usd);
     if (countsAsSpending(kind)) {
       add(expenseTotals, t.category.id, t.category.name, flow.spending);
@@ -63,6 +68,7 @@ function summarize(transactions: Txn[]) {
     net: Math.round((income - expense) * 100) / 100,
     savings: Math.round(savings * 100) / 100,
     fixed: Math.round(fixed * 100) / 100,
+    needs: Math.round(needs * 100) / 100,
     expenseBreakdown: toSortedArray(expenseTotals),
     incomeBreakdown: toSortedArray(incomeTotals),
     instrumentBreakdown: toSortedArray(instrumentTotals),
@@ -79,7 +85,9 @@ export async function GET(req: Request) {
   const year = Number(searchParams.get("year")) || now.getFullYear();
 
   const monthStart = new Date(year, month - 1, 1);
-  const monthEnd = new Date(year, month, 1); // exclusive
+  // ?upto=9: the month up to its 9th day, to compare with this month so far.
+  const upto = Number(searchParams.get("upto")) || 0;
+  const monthEnd = upto > 0 ? new Date(year, month - 1, Math.min(upto, new Date(year, month, 0).getDate()) + 1) : new Date(year, month, 1); // exclusive
 
   const yearStart = new Date(year, 0, 1);
   const yearEnd = year === now.getFullYear() ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : new Date(year + 1, 0, 1);
