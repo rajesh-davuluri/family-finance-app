@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatDate } from "@/lib/formatDate";
+import PaycheckForm, { PaycheckDetail, periodLabel, shiftDay } from "@/components/paychecks/PaycheckForm";
 import {
   BUCKET_LABELS,
   Bucket,
@@ -21,11 +22,14 @@ type Bill = { id: string; date: string; label: string; categoryName: string; ins
 // A bill found in history rather than set up as a recurring template.
 type ExpectedBill = Omit<Bill, "id"> & { key: string; frequency: string };
 type Bank = { id: string; name: string; currency: string; balance: number | null; usd: number | null };
+type Account = { id: string; name: string; currency: string };
 type Data =
-  | { hasData: false; today: string }
+  | { hasData: false; today: string; banks: Account[]; details: Record<string, PaycheckDetail> }
   | {
       hasData: true;
       today: string;
+      banks: Account[];
+      details: Record<string, PaycheckDetail>;
       cycles: Cycle[];
       expected: ExpectedPayday[];
       earlierSalaryDays: number;
@@ -83,17 +87,28 @@ export default function PaychecksPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  // "add" for a new paycheck, or the Salary transaction whose hours are being edited.
+  const [form, setForm] = useState<"add" | string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/paychecks")
+  // keep: stay on the selected cycle (after editing hours); otherwise go to
+  // the latest one (first load, a new paycheck).
+  const load = useCallback((keep = false) => {
+    fetch("/api/paychecks", { cache: "no-store" })
       .then(async (r) => {
         const body = await r.json();
         if (!r.ok) throw new Error(typeof body.error === "string" ? body.error : "Couldn't load your paychecks.");
         setData(body);
-        if (body.hasData) setSelected(body.cycles.length - 1);
+        if (body.hasData) setSelected((cur) => (keep && cur != null && cur < body.cycles.length ? cur : body.cycles.length - 1));
       })
       .catch((e) => setError(e.message));
   }, []);
+  useEffect(() => load(), [load]);
+
+  function closeForm(saved: boolean) {
+    const wasAdding = form === "add";
+    setForm(null);
+    if (saved) load(!wasAdding);
+  }
 
   const cycle = data?.hasData && selected !== null ? data.cycles[selected] : null;
   const summary = useMemo(
@@ -113,13 +128,31 @@ export default function PaychecksPage() {
   if (error) return <p className="rounded-lg border bg-white p-4 text-sm text-red-600">{error}</p>;
   if (!data) return <p className="text-sm text-gray-500">Loading…</p>;
 
+  // A new paycheck's likely pay period: the two weeks after the last one recorded, and the usual hours.
+  const latestDetail = Object.values(data.details)
+    .filter((d) => d.periodEnd)
+    .sort((a, b) => b.periodEnd!.localeCompare(a.periodEnd!))[0];
+  const suggested: PaycheckDetail | undefined = latestDetail
+    ? { hoursPaid: latestDetail.hoursPaid, periodStart: shiftDay(latestDetail.periodEnd!, 1), periodEnd: shiftDay(latestDetail.periodEnd!, 14) }
+    : undefined;
+  const addButton = (
+    <button onClick={() => setForm(form === "add" ? null : "add")} className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
+      + Add paycheck
+    </button>
+  );
+  const addForm = form === "add" && <PaycheckForm banks={data.banks} today={data.today} suggested={suggested} onDone={closeForm} />;
+
   if (!data.hasData || !cycle || !summary) {
     return (
       <div className="space-y-3">
-        <h1 className="text-xl font-semibold">Paychecks</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">Paychecks</h1>
+          {addButton}
+        </div>
+        {addForm}
         <div className="rounded-lg border bg-white p-4 text-sm text-gray-600">
-          Add each paycheck as a transaction in the <strong>Salary</strong> category on the day it lands. This page then
-          splits your money into pay cycles and shows where each paycheck went.
+          Add each paycheck with <strong>+ Add paycheck</strong> (or as a transaction in the <strong>Salary</strong> category) on the day it
+          lands. This page then splits your money into pay cycles and shows where each paycheck went.
         </div>
       </div>
     );
@@ -154,7 +187,8 @@ export default function PaychecksPage() {
           <h1 className="text-xl font-semibold">Paychecks</h1>
           <p className="text-sm text-gray-500">Each paycheck, where it went, and what&rsquo;s left before the next one.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {addButton}
           <button
             onClick={() => select(cycle.index - 1)}
             disabled={cycle.index === 0}
@@ -179,6 +213,8 @@ export default function PaychecksPage() {
           </button>
         </div>
       </div>
+
+      {addForm}
 
       {/* Headline tiles */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -212,6 +248,19 @@ export default function PaychecksPage() {
           }
         />
       </div>
+
+      {form && form !== "add" ? (
+        <PaycheckForm
+          banks={data.banks}
+          today={today}
+          transactionId={form}
+          amount={cycle.paycheck.usd}
+          initial={data.details[form]}
+          onDone={closeForm}
+        />
+      ) : (
+        <PayDetailLine detail={data.details[cycle.paycheck.transactionId]} paycheckUsd={cycle.paycheck.usd} onEdit={() => setForm(cycle.paycheck.transactionId)} />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         {/* Where it went */}
@@ -451,6 +500,7 @@ export default function PaychecksPage() {
                 <tr className="border-b">
                   <th className="py-1.5 pr-3 font-normal">Paycheck</th>
                   <th className="py-1.5 pr-3 text-right font-normal">Amount</th>
+                  <th className="hidden py-1.5 pr-3 text-right font-normal sm:table-cell">Hours</th>
                   <th className="py-1.5 pr-3 text-right font-normal">Spent</th>
                   <th className="hidden py-1.5 pr-3 text-right font-normal sm:table-cell">Saved</th>
                   <th className="py-1.5 text-right font-normal">Left</th>
@@ -466,8 +516,16 @@ export default function PaychecksPage() {
                     <td className="whitespace-nowrap py-1.5 pr-3">
                       {day(c.start, true)}
                       {c.isCurrent && <span className="ml-2 text-xs text-brand-700">current</span>}
+                      {data.details[c.paycheck.transactionId]?.periodStart && (
+                        <span className="block text-xs text-gray-400">
+                          worked {periodLabel(data.details[c.paycheck.transactionId].periodStart!, data.details[c.paycheck.transactionId].periodEnd!)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{usd(c.paycheck.usd)}</td>
+                    <td className="hidden py-1.5 pr-3 text-right tabular-nums text-gray-600 sm:table-cell">
+                      {data.details[c.paycheck.transactionId]?.hoursPaid ?? <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{usd(s.spent)}</td>
                     <td className="hidden py-1.5 pr-3 text-right tabular-nums sm:table-cell">{usd(s.savings)}</td>
                     <td className={`py-1.5 text-right tabular-nums ${s.leftOver >= 0 ? "text-income-600" : "text-expense-600"}`}>
@@ -508,6 +566,37 @@ export default function PaychecksPage() {
 
 function bucketKey(b: Bucket): "bills" | "debt" | "spending" | "savings" {
   return b === "BILLS" ? "bills" : b === "DEBT" ? "debt" : b === "SAVINGS" ? "savings" : "spending";
+}
+
+// The selected paycheck's hours and pay period, or a prompt to add them.
+function PayDetailLine({ detail, paycheckUsd, onEdit }: { detail?: PaycheckDetail; paycheckUsd: number; onEdit: () => void }) {
+  const has = detail && (detail.hoursPaid != null || detail.periodStart);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-white px-4 py-2.5 text-sm">
+      {has ? (
+        <>
+          {detail.periodStart && detail.periodEnd && (
+            <span>
+              <span className="text-gray-500">Pay period</span> <b>{periodLabel(detail.periodStart, detail.periodEnd)}</b>
+            </span>
+          )}
+          {detail.hoursPaid != null && (
+            <span>
+              <b className="tabular-nums">{detail.hoursPaid}</b> <span className="text-gray-500">hours paid</span>
+            </span>
+          )}
+          {detail.hoursPaid != null && detail.hoursPaid > 0 && (
+            <span className="tabular-nums text-gray-500">${(paycheckUsd / detail.hoursPaid).toFixed(2)} an hour take-home</span>
+          )}
+        </>
+      ) : (
+        <span className="text-gray-500">No hours or pay period for this paycheck yet.</span>
+      )}
+      <button onClick={onEdit} className="text-brand-600 hover:underline">
+        {has ? "Edit" : "Add hours & pay period"}
+      </button>
+    </div>
+  );
 }
 
 function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "income" | "expense" }) {

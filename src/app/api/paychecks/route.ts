@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { toApproxUsd } from "@/lib/fx";
@@ -8,6 +9,7 @@ import { CycleTransaction, Payday, addDays, biweeklyPaydays, buildCycles, expect
 import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 import { detectHouseholdRecurring } from "@/lib/recurringData";
 import { dueBefore } from "@/lib/recurringDetect";
+import { PaycheckDetailView, detailData, hasDetail, paycheckDetailSchema } from "@/lib/paycheckDetail";
 
 // Data for the Paychecks page: the biweekly paydays (from actual Salary
 // transactions), every transaction since the first of them, bills due before
@@ -24,11 +26,23 @@ export async function GET() {
   const householdId = user.householdId;
   const today = calendarDateInZone();
 
-  const incomeRows = await prisma.transaction.findMany({
-    where: { householdId, category: { direction: "INCOME" } },
-    select: { id: true, date: true, amount: true, currency: true, category: { select: { name: true, direction: true, kind: true } } },
-    orderBy: { date: "asc" },
-  });
+  const [incomeRows, bankRows] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { householdId, category: { direction: "INCOME" } },
+      select: {
+        id: true,
+        date: true,
+        amount: true,
+        currency: true,
+        instrumentId: true,
+        category: { select: { name: true, direction: true, kind: true } },
+        paycheck: { select: { hoursPaid: true, periodStart: true, periodEnd: true } },
+      },
+      orderBy: { date: "asc" },
+    }),
+    prisma.paymentInstrument.findMany({ where: { householdId, type: "BANK_ACCOUNT", archived: false }, orderBy: { name: "asc" } }),
+  ]);
+  // Bank accounts a paycheck can be added to, the usual one first.
   const salaries: Payday[] = incomeRows
     .filter((t) => isSalary(kindOf(t.category), t.category.name))
     .map((t) => ({
@@ -39,7 +53,22 @@ export async function GET() {
       transactionId: t.id,
     }));
 
-  if (salaries.length === 0) return NextResponse.json({ hasData: false, today });
+  const lastInstrument = [...incomeRows].reverse().find((t) => isSalary(kindOf(t.category), t.category.name))?.instrumentId ?? null;
+  const banks = bankRows
+    .map((b) => ({ id: b.id, name: b.name, currency: b.currency }))
+    .sort((a, b) => Number(b.id === lastInstrument) - Number(a.id === lastInstrument));
+  // Hours and pay period, by Salary transaction.
+  const details: Record<string, PaycheckDetailView> = {};
+  for (const t of incomeRows) {
+    if (!t.paycheck) continue;
+    details[t.id] = {
+      hoursPaid: t.paycheck.hoursPaid == null ? null : Number(t.paycheck.hoursPaid),
+      periodStart: t.paycheck.periodStart?.toISOString().slice(0, 10) ?? null,
+      periodEnd: t.paycheck.periodEnd?.toISOString().slice(0, 10) ?? null,
+    };
+  }
+
+  if (salaries.length === 0) return NextResponse.json({ hasData: false, today, banks, details });
 
   const { paydays, earlierIgnored } = biweeklyPaydays(salaries);
   const cycles = buildCycles(paydays);
@@ -116,12 +145,8 @@ export async function GET() {
     Math.round(bills.filter((b) => b.status !== "STOPPED").reduce((s, b) => s + b.perPaycheckUsd, 0) * 100) / 100;
 
   // Bank balances, only where an opening balance makes them knowable.
-  const banks = await prisma.paymentInstrument.findMany({
-    where: { householdId, type: "BANK_ACCOUNT", archived: false },
-    orderBy: { name: "asc" },
-  });
   const bankBalances = await Promise.all(
-    banks.map(async (b) => {
+    bankRows.map(async (b) => {
       const known = b.openingBalance !== null && b.openingBalanceDate !== null;
       const balance = known ? await computeInstrumentBalance(b.id, Number(b.openingBalance), b.openingBalanceDate!) : null;
       return { id: b.id, name: b.name, currency: b.currency, balance, usd: balance === null ? null : usd2(balance, b.currency) };
@@ -140,5 +165,60 @@ export async function GET() {
     expectedBills,
     setAsidePerPaycheckUsd,
     bankBalances,
+    banks,
+    details,
   });
+}
+
+// Add a paycheck: a Salary transaction on the day it landed, with the hours
+// paid and the pay period.
+const createSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.number().positive().max(10_000_000),
+  instrumentId: z.string().min(1),
+  notes: z.string().max(500).optional(),
+  detail: paycheckDetailSchema,
+});
+
+export async function POST(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  const parsed = createSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return NextResponse.json({ error: issue?.path[0] === "detail" ? issue.message : "Check the amount, date and account." }, { status: 400 });
+  }
+  const { date, amount, instrumentId, notes, detail } = parsed.data;
+  const householdId = user.householdId;
+
+  const instrument = await prisma.paymentInstrument.findUnique({ where: { id: instrumentId } });
+  if (!instrument || instrument.householdId !== householdId || instrument.archived) return NextResponse.json({ error: "Pick one of your accounts." }, { status: 400 });
+
+  // The Salary category last used, else one named for pay, else a new one.
+  const incomeCats = await prisma.transactionCategory.findMany({ where: { householdId, direction: "INCOME" } });
+  const salaryCats = incomeCats.filter((c) => isSalary(kindOf(c), c.name));
+  const lastUsed = salaryCats.length
+    ? await prisma.transaction.findFirst({ where: { householdId, categoryId: { in: salaryCats.map((c) => c.id) } }, orderBy: { date: "desc" }, select: { categoryId: true } })
+    : null;
+  const categoryId =
+    lastUsed?.categoryId ??
+    salaryCats[0]?.id ??
+    (await prisma.transactionCategory.create({ data: { name: "Salary", direction: "INCOME", kind: "INCOME", group: "INCOME", householdId } })).id;
+
+  const created = await prisma.transaction.create({
+    data: {
+      source: "MANUAL",
+      amount,
+      currency: instrument.currency,
+      date: new Date(`${date}T00:00:00Z`),
+      notes: notes || "Paycheck",
+      categoryId,
+      instrumentId,
+      householdId,
+      createdById: user.id,
+      ...(hasDetail(detail) ? { paycheck: { create: detailData(detail) } } : {}),
+    },
+    select: { id: true },
+  });
+  return NextResponse.json({ id: created.id }, { status: 201 });
 }
