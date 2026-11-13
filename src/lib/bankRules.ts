@@ -19,7 +19,8 @@
 export type BankRule =
   | { kind: "CARD_PAYMENT"; card: { name: RegExp | null; last4: string | null }; label: string }
   | { kind: "SALARY"; label: string }
-  | { kind: "OWN_TRANSFER"; label: string }
+  // account: the household's own account the line names, when it names one.
+  | { kind: "OWN_TRANSFER"; label: string; account?: string }
   | { kind: "INVESTMENT"; label: string }
   | { kind: "REMITTANCE"; label: string }
   | { kind: "CASH_WITHDRAWAL"; label: string }
@@ -51,7 +52,10 @@ const INVESTMENT = /\bCOINBASE\b|\bROBINHOOD\s*(SECURITIES|MONEY|CRYPTO|DES:\s*D
 // Utility and phone billers that pay by bank transfer.
 const UTILITY = /\bDOMINION\s*ENERGY\b|\bCOMCAST\b|\bXFINITY\b|\bVERIZON\b|\bCITY\s*OF\s*RICHMOND\b|\bCITYOFRICHMOND\b|\bAT&T\b|\bT-?MOBILE\b|\bDUKE\s*ENERGY\b|\bPEPCO\b|\bWASHINGTON\s*GAS\b|\bSPECTRUM\b|\bCOX\s*COMM|\bWATER\s*(DEPT|UTILIT|BILL)/i;
 
-export function classifyBankLine(description: string, opts: { moneyIn: boolean; ownNames: string[] }): BankRule | null {
+// accounts: the names of the household's other bank accounts and wallets
+// (not cards), so a line naming one of them ("WELLS FARGO DES:TRANSFER",
+// "BFCU ... DEPOSIT") is a transfer with that account.
+export function classifyBankLine(description: string, opts: { moneyIn: boolean; ownNames: string[]; accounts?: string[] }): BankRule | null {
   const d = description.replace(/\s+/g, " ").trim();
   if (!d) return null;
 
@@ -72,6 +76,14 @@ export function classifyBankLine(description: string, opts: { moneyIn: boolean; 
     return { kind: "SALARY", label: "Paycheck" };
   }
 
+  // Money moved to or from another of your own accounts, named on the line.
+  if (TRANSFER_WORDS.test(d)) {
+    for (const name of opts.accounts ?? []) {
+      const re = accountPattern(name);
+      if (re && re.test(d)) return { kind: "OWN_TRANSFER", label: `${opts.moneyIn ? "From" : "To"} ${name}`, account: name };
+    }
+  }
+
   // Zelle / online transfers to or from yourself, in either direction.
   const own = opts.ownNames.map((n) => n.trim().toUpperCase()).filter((n) => n.length >= 3);
   const zelle = d.match(/\bZelle payment (?:from|to) ([A-Z][A-Z .'-]+?)(?:\s+for\b|\s+Conf#|;|$)/i);
@@ -80,6 +92,32 @@ export function classifyBankLine(description: string, opts: { moneyIn: boolean; 
     return { kind: "OWN_TRANSFER", label: "Between your own accounts" };
   }
   return null;
+}
+
+// How a bank-to-bank move reads on a statement.
+const TRANSFER_WORDS = /\b(TRANSFER|XFER|TRNSFR|TRANSFR|EXT|ACH|DEPOSIT|ONLINE|MOBILE|FUNDS|P2P|PMT|PAYMENT)\b|\bDES:/i;
+
+// Words in an account name that don't identify the bank.
+const GENERIC = new Set(["CHECKING", "CHK", "SAVINGS", "SAV", "ACCOUNT", "ACCT", "FUND", "EMERGENCY", "BANK", "MY", "JOINT", "PRIMARY", "MAIN", "THE", "AND", "USD", "INR", "BILLS", "SPENDING"]);
+// What a bank's name looks like on another bank's statement.
+const ALIASES: [RegExp, string][] = [
+  [/\b(BOFA|BOA|BANK OF AMERICA)\b/i, "BOFA|BOA|BANK\\s*OF\\s*AMERICA|BKOFAMERICA"],
+  [/\b(WF|WELLS(\s*FARGO)?)\b/i, "WELLS\\s*FARGO|WELLSFARGO|WF"],
+  [/\bCHASE\b/i, "CHASE|JPMORGAN"],
+  [/\bCITI(BANK)?\b/i, "CITI\\s*BANK|CITIBANK"],
+  [/\bCAPITAL\s*ONE\b/i, "CAPITAL\\s*ONE|CAPITALONE"],
+  [/\bPNC\b/i, "PNC"],
+  [/\bTRUIST\b/i, "TRUIST"],
+];
+
+// A pattern for an account name on a statement line: a known bank's usual
+// spellings, or the account name's own identifying words in order
+// ("BFCU Savings" -> BFCU). Null when the name is all generic words.
+export function accountPattern(name: string): RegExp | null {
+  for (const [match, spellings] of ALIASES) if (match.test(name)) return new RegExp(`\\b(${spellings})\\b`, "i");
+  const words = name.toUpperCase().split(/[^A-Z0-9]+/).filter((w) => w.length >= 2 && !GENERIC.has(w));
+  if (!words.length) return null;
+  return new RegExp(`\\b${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*")}\\b`, "i");
 }
 
 // "RAJESH DAVULURI" vs "Rajesh Davuluri" (or "DAVULURI RAJESH").

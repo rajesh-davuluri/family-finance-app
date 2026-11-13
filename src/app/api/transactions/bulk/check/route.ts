@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { describeExisting, loadForDuplicateCheck } from "@/lib/duplicateData";
 import { DUPLICATE_WINDOW_DAYS, matchRows } from "@/lib/duplicates";
+import { kindOf } from "@/lib/categoryKind";
 
 // Pre-import duplicate check for the CSV/PDF import flow: for each row about
 // to be imported, find a transaction already in the app that's likely the
@@ -100,6 +101,39 @@ export async function POST(req: Request) {
     };
   };
 
+  // The other side of a move between accounts, already recorded on the other
+  // account as a transaction in a transfer category ("Transfer Out" on BofA
+  // for this "Transfer In" on Wells Fargo): same amount and currency, the
+  // other direction, within a few days. Not a duplicate -- this account
+  // still needs its side -- but it shouldn't become a second, linked
+  // transfer that moves the money out of the other account again.
+  const sides = await prisma.transaction.findMany({
+    where: {
+      householdId: user.householdId,
+      currency: instrument.currency,
+      NOT: { instrumentId },
+      date: {
+        gte: new Date(Date.parse(`${dates[0]}T00:00:00Z`) - DUPLICATE_WINDOW_DAYS * 86_400_000),
+        lt: new Date(Date.parse(`${dates[dates.length - 1]}T00:00:00Z`) + (DUPLICATE_WINDOW_DAYS + 1) * 86_400_000),
+      },
+    },
+    select: { id: true, date: true, amount: true, instrumentId: true, instrument: { select: { name: true, type: true } }, category: { select: { name: true, direction: true, kind: true } } },
+  });
+  const transferSides = sides.filter((t) => kindOf(t.category) === "TRANSFER" && t.instrument.type !== "CREDIT_CARD");
+  const usedSides = new Set<string>();
+  const otherSides = rows.map((r) => {
+    const t = transferSides.find(
+      (x) =>
+        !usedSides.has(x.id) &&
+        Math.round(Number(x.amount) * 100) === Math.round(Math.abs(r.amount) * 100) &&
+        (x.category.direction === "INCOME") === !r.moneyIn &&
+        Math.abs(Date.parse(`${r.date}T00:00:00Z`) - x.date.getTime()) <= DUPLICATE_WINDOW_DAYS * 86_400_000
+    );
+    if (!t) return null;
+    usedSides.add(t.id);
+    return { instrumentId: t.instrumentId, instrumentName: t.instrument.name, categoryName: t.category.name, date: t.date.toISOString().slice(0, 10) };
+  });
+
   const matches = found.map((m, i) => {
     if (!m) return transferMatch(rows[i]);
     const e = byId.get(m.id)!;
@@ -111,5 +145,5 @@ export async function POST(req: Request) {
       reason: m.reason,
     };
   });
-  return NextResponse.json({ matches });
+  return NextResponse.json({ matches, otherSides });
 }

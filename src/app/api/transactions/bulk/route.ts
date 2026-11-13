@@ -5,20 +5,23 @@ import { getCurrentUser } from "@/lib/session";
 import { rememberNotDuplicates } from "@/lib/duplicateData";
 import { Currency } from "@/lib/enums";
 
-// A row is either a transaction in a category, or -- for a card payment, a
-// top-up or cash moved to another account of the household -- a transfer
-// from the account being imported to that account.
+// A row is either a transaction in a category, or a transfer with another
+// account of the household: money out (a card payment, a top-up, cash, a move
+// to another bank) goes to that account, money in comes from it.
 const rowSchema = z
   .object({
     date: z.string(),
     amount: z.number().positive(),
     categoryId: z.string().optional(),
     transferToInstrumentId: z.string().optional(),
+    transferFromInstrumentId: z.string().optional(),
     notes: z.string().optional(),
     // Imported although it matched this transaction: not a duplicate of it.
     notDuplicateOf: z.string().max(64).optional(),
   })
-  .refine((r) => !!r.categoryId !== !!r.transferToInstrumentId, { message: "Each row needs a category or a transfer account." });
+  .refine((r) => [r.categoryId, r.transferToInstrumentId, r.transferFromInstrumentId].filter(Boolean).length === 1, {
+    message: "Each row needs a category or a transfer account.",
+  });
 
 const bulkSchema = z.object({
   instrumentId: z.string(),
@@ -50,7 +53,8 @@ export async function POST(req: Request) {
   }
 
   const txnRows = rows.filter((r) => r.categoryId);
-  const transferRows = rows.filter((r) => r.transferToInstrumentId);
+  const transferRows = rows.filter((r) => r.transferToInstrumentId || r.transferFromInstrumentId);
+  const otherAccount = (r: (typeof rows)[number]) => (r.transferToInstrumentId ?? r.transferFromInstrumentId)!;
 
   // Confirm every category and transfer account referenced belongs to this
   // household, in one query each rather than one per row.
@@ -62,7 +66,7 @@ export async function POST(req: Request) {
   if (validCategories.length !== categoryIds.length) {
     return NextResponse.json({ error: "One or more categories are invalid." }, { status: 400 });
   }
-  const targetIds = Array.from(new Set(transferRows.map((r) => r.transferToInstrumentId!)));
+  const targetIds = Array.from(new Set(transferRows.map(otherAccount)));
   const validTargets = await prisma.paymentInstrument.count({
     where: { id: { in: targetIds }, householdId: user.householdId, NOT: { id: instrumentId } },
   });
@@ -127,8 +131,8 @@ export async function POST(req: Request) {
         currency,
         date: new Date(r.date),
         notes: r.notes,
-        fromInstrumentId: instrumentId,
-        toInstrumentId: r.transferToInstrumentId!,
+        fromInstrumentId: r.transferFromInstrumentId ?? instrumentId,
+        toInstrumentId: r.transferToInstrumentId ?? instrumentId,
         householdId: user.householdId,
         createdById: user.id,
       })),
