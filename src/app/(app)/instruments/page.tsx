@@ -5,6 +5,7 @@ import { AccountFreshness } from "@/components/AccountActivity";
 import Link from "next/link";
 import { money } from "@/lib/money";
 import AccountDetailsPanel from "@/components/AccountDetailsPanel";
+import BalanceBreakdown from "@/components/BalanceBreakdown";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
@@ -56,6 +57,8 @@ export default function InstrumentsPage() {
 
   // Which instrument's balance is currently being edited, if any.
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
+  // An account whose balance breakdown is open.
+  const [howId, setHowId] = useState<string | null>(null);
   // Which instrument's details (bank, IFSC, account number...) are open.
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [balanceForm, setBalanceForm] = useState({ amount: "", date: getTodayLocal() });
@@ -346,7 +349,13 @@ export default function InstrumentsPage() {
                         {i.balanceFromTransactionsOnly ? "(from transactions · set starting balance)" : "(edit)"}
                       </span>
                     </button>
-                  ) : (
+                  ) : null}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.currentBalance !== null && i.openingBalanceDate && (
+                    <button onClick={() => setHowId(howId === i.id ? null : i.id)} className="ml-2 text-xs text-brand-600 hover:underline">
+                      {howId === i.id ? "hide" : "how?"}
+                    </button>
+                  )}
+                  {i.type === "CREDIT_CARD" || editingBalanceId === i.id || i.currentBalance !== null ? null : (
                     <button onClick={() => startEditingBalance(i)} className="text-xs text-brand-600 hover:underline">
                       Set balance
                     </button>
@@ -374,6 +383,20 @@ export default function InstrumentsPage() {
                   </button>
                 </td>
               </tr>
+              {i.type !== "CREDIT_CARD" && (editingBalanceId === i.id ? /^\d{4}-\d{2}-\d{2}$/.test(balanceForm.date) : howId === i.id && !!i.openingBalanceDate) && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6} className="px-3 py-2.5">
+                    {/* The table scrolls sideways on a phone: keep this on screen. */}
+                    <div className="sticky left-3 max-w-[calc(100vw-3.5rem)] sm:max-w-2xl">
+                    {editingBalanceId === i.id ? (
+                      <BalanceBreakdown instrumentId={i.id} since={balanceForm.date} opening={balanceForm.amount === "" ? null : parseFloat(balanceForm.amount)} currency={i.currency} />
+                    ) : (
+                      <BalanceBreakdown instrumentId={i.id} since={i.openingBalanceDate!.slice(0, 10)} opening={i.openingBalance == null ? null : Number(i.openingBalance)} currency={i.currency} />
+                    )}
+                    </div>
+                  </td>
+                </tr>
+              )}
               {detailsId === i.id && (
                 <tr className="border-b bg-gray-50 last:border-0">
                   <td colSpan={6}>
