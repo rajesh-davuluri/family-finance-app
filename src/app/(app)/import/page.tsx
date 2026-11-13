@@ -8,11 +8,15 @@ import { parseStatementLines } from "@/lib/statementParse";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 import { useSession } from "next-auth/react";
-import { classifyBankLine, moneyInSign, stripCsvPreamble } from "@/lib/bankRules";
+import { accountPattern, classifyBankLine, moneyInSign, stripCsvPreamble } from "@/lib/bankRules";
 import { NewCategory, ruleOverridesHistory, targetForRule } from "@/lib/importRules";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; effectiveKind?: string };
 type Instrument = { id: string; name: string; currency: string; archived: boolean; type: string; last4: string | null };
+
+// The other side of a move between accounts, already recorded on that account
+// in a transfer category.
+type OtherSide = { instrumentId: string; instrumentName: string; categoryName: string; date: string };
 
 type ExistingMatch = {
   id: string;
@@ -61,13 +65,37 @@ type PreviewRow = {
   // Existing transaction with the same date + amount, found when the preview
   // was built. Only shown while the row's date/amount still match it.
   match: ExistingMatch | null;
-  // Set for a card payment (or a top-up / cash) recognised on a bank
-  // statement: imported as a transfer to this account instead of a
-  // transaction in a category.
+  // Set for a transfer with another of the household's accounts (a card
+  // payment, a top-up, cash, a move to or from another bank): imported as a
+  // transfer instead of a transaction in a category. The other account:
+  // where money out went, or where money in came from.
   transferToId: string | null;
   // What the bank-line rules recognised, e.g. "Citi card payment".
   ruleLabel: string | null;
 };
+
+// The category list's "transfer" choice.
+const TRANSFER_OPTION = "__transfer";
+// Wallets: a "PAYPAL ... XFER" bank line is usually a purchase paid through
+// PayPal, not money moved to it (top-ups have their own rule).
+const WALLET = /paypal|venmo|cash\s*app/i;
+
+// Accounts a row on this account can be a transfer with: the household's
+// other open accounts in the same currency (no conversion on a transfer).
+function transferAccounts(instruments: Instrument[], instrumentId: string) {
+  const here = instruments.find((x) => x.id === instrumentId);
+  return instruments
+    .filter((x) => !x.archived && x.id !== instrumentId && (!here || x.currency === here.currency))
+    .sort((a, b) => Number(b.type === "BANK_ACCOUNT") - Number(a.type === "BANK_ACCOUNT")); // banks first
+}
+
+// For "Transfer to my account...": an account the line names, else the first
+// other bank account, else any other account.
+function guessTransferAccount(r: PreviewRow, instruments: Instrument[], instrumentId: string) {
+  const options = transferAccounts(instruments, instrumentId);
+  const named = options.find((x) => accountPattern(x.name)?.test(r.rawDescription));
+  return (named ?? options.find((x) => x.type === "BANK_ACCOUNT") ?? options[0])?.id ?? null;
+}
 
 function isAutoCategorized(r: PreviewRow) {
   return r.suggestedCategoryId !== null && r.categoryId === r.suggestedCategoryId;
@@ -281,7 +309,7 @@ export default function ImportPage() {
     }
   }
 
-  async function findExistingMatches(preview: PreviewRow[]): Promise<(ExistingMatch | null)[] | null> {
+  async function findExistingMatches(preview: PreviewRow[]): Promise<{ matches: (ExistingMatch | null)[]; otherSides: (OtherSide | null)[] } | null> {
     const res = await fetch("/api/transactions/bulk/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -292,7 +320,7 @@ export default function ImportPage() {
     });
     if (!res.ok) return null;
     const body = await res.json();
-    return body.matches;
+    return { matches: body.matches, otherSides: body.otherSides ?? [] };
   }
 
   async function suggestCategories(preview: PreviewRow[]): Promise<({ categoryId: string } | null)[] | null> {
@@ -353,7 +381,8 @@ export default function ImportPage() {
     // with the same date and amount, and leave those rows unchecked.
     // Alongside that, fill in categories learned from past transactions.
     setChecking(true);
-    const [matches, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
+    const [checked, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
+    const matches = checked?.matches ?? null;
     setChecking(false);
     // Learned suggestions only when they point the right way (money in ->
     // an income category, money out -> an expense one).
@@ -370,8 +399,11 @@ export default function ImportPage() {
     // own accounts, investing, ATM cash -- get the right treatment.
     const proposedNew = new Map<string, NewCategory>();
     const ownNames = [session?.user?.name ?? ""].filter(Boolean);
+    const accounts = transferAccounts(instruments, instrumentId)
+      .filter((i) => i.type !== "CREDIT_CARD" && !WALLET.test(i.name))
+      .map((i) => i.name);
     preview.forEach((row) => {
-      const rule = classifyBankLine(row.rawDescription, { moneyIn: row.isCredit, ownNames });
+      const rule = classifyBankLine(row.rawDescription, { moneyIn: row.isCredit, ownNames, accounts });
       if (!rule) return;
       if (!ruleOverridesHistory(rule) && row.suggestedCategoryId) return;
       const target = targetForRule(rule, row.isCredit, { categories, instruments, importInstrumentId: instrumentId });
@@ -385,6 +417,20 @@ export default function ImportPage() {
       if (target.newCategory) proposedNew.set(target.newCategory.id, target.newCategory);
       // A recognised paycheck or transfer in is worth importing too.
       if (row.isCredit) row.include = row.amount > 0;
+    });
+    // A move whose other side is already recorded, unlinked, on that account
+    // (a "Transfer Out" there): this side goes in a transfer category too, so
+    // the money isn't taken out of that account a second time.
+    checked?.otherSides.forEach((side, i) => {
+      const row = preview[i];
+      if (!side || !row.transferToId || row.transferToId !== side.instrumentId) return;
+      const target = targetForRule({ kind: "OWN_TRANSFER", label: "" }, row.isCredit, { categories, instruments, importInstrumentId: instrumentId });
+      if (!target.categoryId) return;
+      row.transferToId = null;
+      row.categoryId = target.categoryId;
+      row.suggestedCategoryId = target.categoryId;
+      row.ruleLabel = `Other side already on ${side.instrumentName} (${side.categoryName}, ${formatDate(side.date)})`;
+      if (target.newCategory) proposedNew.set(target.newCategory.id, target.newCategory);
     });
     setNewCategories(Array.from(proposedNew.values()));
     if (matches) {
@@ -444,7 +490,9 @@ export default function ImportPage() {
           date: r.date,
           amount: r.amount,
           ...(r.transferToId
-            ? { transferToInstrumentId: r.transferToId }
+            ? r.isCredit
+              ? { transferFromInstrumentId: r.transferToId }
+              : { transferToInstrumentId: r.transferToId }
             : { categoryId: realId.get(r.categoryId) ?? r.categoryId }),
           notes: r.rawDescription || undefined,
           // Ticked although it matched an existing transaction: remember it's not a copy.
@@ -779,17 +827,16 @@ export default function ImportPage() {
                     <td className="p-2">
                       {r.transferToId ? (
                         <span className="flex flex-wrap items-center gap-1">
-                          <span className="text-xs text-gray-500">Transfer to</span>
+                          <span className="text-xs text-gray-500">{r.isCredit ? "Transfer from" : "Transfer to"}</span>
                           <select
-                            aria-label="Transfer to account"
+                            aria-label={r.isCredit ? "Transfer from account" : "Transfer to account"}
                             value={r.transferToId}
                             onChange={(e) =>
                               updateRow(i, e.target.value ? { transferToId: e.target.value } : { transferToId: null })
                             }
                             className="rounded border px-2 py-1 text-xs"
                           >
-                            {instruments
-                              .filter((x) => !x.archived && x.id !== instrumentId)
+                            {transferAccounts(instruments, instrumentId)
                               .map((x) => (
                                 <option key={x.id} value={x.id}>
                                   {x.name}
@@ -801,7 +848,11 @@ export default function ImportPage() {
                       ) : (
                         <select
                           value={r.categoryId}
-                          onChange={(e) => updateRow(i, { categoryId: e.target.value })}
+                          onChange={(e) =>
+                            e.target.value === TRANSFER_OPTION
+                              ? updateRow(i, { transferToId: guessTransferAccount(r, instruments, instrumentId) })
+                              : updateRow(i, { categoryId: e.target.value })
+                          }
                           className="rounded border px-2 py-1 text-xs"
                         >
                           {categories.map((c) => (
@@ -814,6 +865,9 @@ export default function ImportPage() {
                               {c.name} (new)
                             </option>
                           ))}
+                          {transferAccounts(instruments, instrumentId).length > 0 && (
+                            <option value={TRANSFER_OPTION}>{r.isCredit ? "↔ Transfer from my account…" : "↔ Transfer to my account…"}</option>
+                          )}
                         </select>
                       )}
                       {!r.transferToId && isAutoCategorized(r) && (

@@ -11,6 +11,8 @@ import type { CategoryKind } from "@/lib/categoryKind";
 export type RuleCategory = { id: string; name: string; direction: "INCOME" | "EXPENSE"; effectiveKind?: string };
 export type RuleInstrument = { id: string; name: string; type: string; last4: string | null; archived: boolean };
 export type NewCategory = { id: string; name: string; direction: "INCOME" | "EXPENSE"; kind: CategoryKind; group: CategoryGroup };
+// transferToId: the other account of a transfer -- where the money goes for
+// money out, where it came from for money in.
 export type RuleTarget = { label: string; categoryId?: string; transferToId?: string; newCategory?: NewCategory };
 
 export const NEW_CATEGORY_PREFIX = "new:";
@@ -45,15 +47,20 @@ export function targetForRule(
     }
     case "PAYPAL_TOPUP": {
       const paypal = accounts.find((i) => /paypal/i.test(i.name));
-      if (paypal && !moneyIn) return { label: rule.label, transferToId: paypal.id };
+      // To PayPal, or (money in) from it.
+      if (paypal) return { label: rule.label, transferToId: paypal.id };
       return category(byKind("TRANSFER"), proposed(moneyIn ? "Transfer In" : "Transfer Out", dir, "TRANSFER", "TRANSFERS"));
     }
-    case "OWN_TRANSFER":
-      // A transfer-type category named for transfers (not "Card Payment Received").
+    case "OWN_TRANSFER": {
+      // The account the line names: a transfer with it, either way.
+      const named = rule.account && accounts.find((i) => i.type !== "CREDIT_CARD" && i.name === rule.account);
+      if (named) return { label: rule.label, transferToId: named.id };
+      // Otherwise a transfer-type category named for transfers (not "Card Payment Received").
       return category(
         cats.find((c) => c.effectiveKind === "TRANSFER" && /transfer|own account/i.test(c.name)),
         proposed(moneyIn ? "Transfer In" : "Transfer Out", dir, "TRANSFER", "TRANSFERS")
       );
+    }
     case "SALARY":
       if (!moneyIn) break;
       return category(byName(/salary|payroll|paycheck/i), proposed("Salary", "INCOME", "INCOME", "INCOME"));

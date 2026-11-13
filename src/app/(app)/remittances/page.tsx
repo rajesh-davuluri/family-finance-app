@@ -47,6 +47,13 @@ export default function RemittancesPage() {
           <h1 className="font-display text-2xl">Money to India</h1>
           <p className="text-sm text-gray-500">Every transfer, the rupees that arrived, and the rate you got against the market&apos;s that day.</p>
         </div>
+        {data.latestRate != null && (
+          <p className="rounded-lg border bg-white px-3 py-2 text-sm">
+            <span className="text-gray-500">Today </span>
+            <b className="tabular-nums">$1 = {rate(data.latestRate)}</b>
+            <span className="text-xs text-gray-400"> market</span>
+          </p>
+        )}
         {data.years.length > 1 && (
           <select value={data.year} onChange={(e) => setYear(Number(e.target.value))} className="rounded-md border px-3 py-2 text-sm" aria-label="Year">
             {data.years.map((y) => (
@@ -95,8 +102,8 @@ export default function RemittancesPage() {
 
           {s.receiptsMissing > 0 && (
             <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
-              {s.receiptsMissing} transfer{s.receiptsMissing === 1 ? " is" : "s are"} missing the rupees that arrived — tap <b>Enter ₹</b> and type it from the
-              Crobo app or the HDFC credit SMS to see the real rate.
+              {s.receiptsMissing} transfer{s.receiptsMissing === 1 ? " is" : "s are"} missing the rate — tap <b>Enter rate or ₹ received</b> and type the rate from
+              the Crobo app, or the rupees from the HDFC credit SMS.
             </p>
           )}
 
@@ -159,7 +166,7 @@ export default function RemittancesPage() {
                     />
                   ) : (
                     <button onClick={() => setEditing(t.id)} className="mt-1.5 text-sm text-brand-700 underline">
-                      {t.estimated ? "Enter ₹ received" : "Edit ₹ received"}
+                      {t.estimated ? "Enter rate or ₹ received" : "Edit rate or ₹ received"}
                     </button>
                   )}
                 </li>
@@ -188,16 +195,21 @@ function Tile({ label, value, sub, dark, warn }: { label: string; value: string;
   );
 }
 
+// The rupees that arrived, typed in directly or worked out from the rate the
+// service quoted ($1 = ₹x on the dollars left after any fee). Either field
+// fills the other.
 function ReceivedForm({ t, onDone }: { t: TransferView; onDone: () => void }) {
   const [amount, setAmount] = useState(t.estimated ? "" : String(t.inr ?? ""));
   const [fee, setFee] = useState(t.feeUsd ? String(t.feeUsd) : "");
+  const converted = (feeText: string) => t.usd - (Number(feeText.replace(/[,$\s]/g, "")) || 0); // dollars after the fee
+  const [fx, setFx] = useState(!t.estimated && t.inr ? (t.inr / converted(t.feeUsd ? String(t.feeUsd) : "")).toFixed(2) : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const num = (s: string) => Number(s.replace(/[,₹$\s]/g, ""));
 
   async function save(remove = false) {
     const v = num(amount);
-    if (!remove && (!amount.trim() || !Number.isFinite(v) || v <= 0)) return setErr("Enter the rupees that arrived.");
+    if (!remove && (!amount.trim() || !Number.isFinite(v) || v <= 0)) return setErr("Enter the rate or the rupees that arrived.");
     setBusy(true);
     setErr(null);
     const res = await fetch(`/api/remittances/${t.id}`, {
@@ -210,20 +222,72 @@ function ReceivedForm({ t, onDone }: { t: TransferView; onDone: () => void }) {
     onDone();
   }
 
+  const fromRate = (fxText: string, feeText: string) => {
+    const r = num(fxText);
+    return r > 0 && converted(feeText) > 0 ? (Math.round(r * converted(feeText) * 100) / 100).toString() : "";
+  };
+  const toRate = (amountText: string, feeText: string) => {
+    const v = num(amountText);
+    return v > 0 && converted(feeText) > 0 ? (v / converted(feeText)).toFixed(2) : "";
+  };
   const preview = num(amount) > 0 ? num(amount) / t.usd : null;
+  const feeShown = converted(fee) < t.usd;
   return (
-    <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+    <div className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+      <label>
+        <span className="mb-1 block text-xs text-gray-500">Rate ($1 = ₹)</span>
+        <input
+          inputMode="decimal"
+          autoFocus
+          value={fx}
+          onChange={(e) => {
+            setFx(e.target.value);
+            setAmount(fromRate(e.target.value, fee));
+          }}
+          placeholder={t.marketRate ? t.marketRate.toFixed(2) : "88.00"}
+          className="w-full rounded-md border px-3 py-2"
+        />
+      </label>
       <label>
         <span className="mb-1 block text-xs text-gray-500">₹ that arrived</span>
-        <input inputMode="decimal" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t.inr ? String(Math.round(t.inr)) : "0"} className="w-full rounded-md border px-3 py-2" />
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setFx(toRate(e.target.value, fee));
+          }}
+          placeholder={t.inr ? String(Math.round(t.inr)) : "0"}
+          className="w-full rounded-md border px-3 py-2"
+        />
       </label>
-      <label>
+      <label className="col-span-2 sm:col-span-1">
         <span className="mb-1 block text-xs text-gray-500">Fee ($, optional)</span>
-        <input inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0.00" className="w-full rounded-md border px-3 py-2" />
+        <input
+          inputMode="decimal"
+          value={fee}
+          onChange={(e) => {
+            setFee(e.target.value);
+            // Keep the quoted rate; the fee changes the dollars it applies to.
+            if (num(fx) > 0) setAmount(fromRate(fx, e.target.value));
+          }}
+          placeholder="0.00"
+          className="w-full rounded-md border px-3 py-2"
+        />
       </label>
-      {preview && <p className="col-span-2 text-xs text-gray-500">That&apos;s ₹{preview.toFixed(2)} per dollar.</p>}
-      {err && <p className="col-span-2 text-red-600">{err}</p>}
-      <div className="col-span-2 flex gap-2">
+      <p className="col-span-2 text-xs text-gray-500 sm:col-span-3">
+        Type the rate the app showed, or the rupees from the bank SMS — either fills the other.
+        {preview && (
+          <>
+            {" "}
+            {money(t.usd, "USD")}
+            {feeShown && <> − {money(t.usd - converted(fee), "USD")} fee</>} → <b>{inr(num(amount))}</b>, ₹{preview.toFixed(2)} per dollar sent
+            {t.marketRate ? ` (market ₹${t.marketRate.toFixed(2)})` : ""}.
+          </>
+        )}
+      </p>
+      {err && <p className="col-span-2 text-red-600 sm:col-span-3">{err}</p>}
+      <div className="col-span-2 flex gap-2 sm:col-span-3">
         <button onClick={() => save()} disabled={busy} className="flex-1 rounded-md bg-brand-600 px-4 py-2 font-medium text-white disabled:opacity-50">
           {busy ? "Saving…" : "Save"}
         </button>
