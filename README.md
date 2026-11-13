@@ -60,7 +60,7 @@ See `.env.example` for the full annotated list. You need:
 5. **Run migrations against it**: temporarily set `DATABASE_URL` to that string in your terminal, then `npx prisma migrate deploy`.
 6. **Import into Vercel** (vercel.com → sign in with GitHub → Add New Project). Before deploying, add all the environment variables from step 3 above (using the Azure connection string, not your local one) under Project Settings → Environment Variables.
 7. **Deploy.** Vercel gives you a free `https://your-project.vercel.app` URL.
-8. **Recurring transactions on a schedule**: `vercel.json` already defines a daily cron hitting `/api/cron/generate-recurring` — just make sure `CRON_SECRET` is set as an environment variable on the Vercel project (same value the cron will send automatically).
+8. **Recurring transactions on a schedule**: `vercel.json` already defines one daily cron hitting `/api/cron/daily` (recurring transactions, then reminders, in one run so the serverless database wakes once a day) — just make sure `CRON_SECRET` is set as an environment variable on the Vercel project (same value the cron will send automatically).
 
 ## 6. Security notes — read before letting family use this for real
 
