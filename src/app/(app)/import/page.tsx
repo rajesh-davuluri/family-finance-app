@@ -84,7 +84,9 @@ const WALLET = /paypal|venmo|cash\s*app/i;
 // other open accounts in the same currency (no conversion on a transfer).
 function transferAccounts(instruments: Instrument[], instrumentId: string) {
   const here = instruments.find((x) => x.id === instrumentId);
-  return instruments.filter((x) => !x.archived && x.id !== instrumentId && (!here || x.currency === here.currency));
+  return instruments
+    .filter((x) => !x.archived && x.id !== instrumentId && (!here || x.currency === here.currency))
+    .sort((a, b) => Number(b.type === "BANK_ACCOUNT") - Number(a.type === "BANK_ACCOUNT")); // banks first
 }
 
 // For "Transfer to my account...": an account the line names, else the first

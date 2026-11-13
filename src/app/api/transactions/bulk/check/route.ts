@@ -119,7 +119,10 @@ export async function POST(req: Request) {
     },
     select: { id: true, date: true, amount: true, instrumentId: true, instrument: { select: { name: true, type: true } }, category: { select: { name: true, direction: true, kind: true } } },
   });
-  const transferSides = sides.filter((t) => kindOf(t.category) === "TRANSFER" && t.instrument.type !== "CREDIT_CARD");
+  // Moves between your own accounts only: not money sent to India, not card payments.
+  const transferSides = sides.filter(
+    (t) => kindOf(t.category) === "TRANSFER" && t.instrument.type !== "CREDIT_CARD" && !/india|abroad|remit|international|overseas|card/i.test(t.category.name)
+  );
   const usedSides = new Set<string>();
   const otherSides = rows.map((r) => {
     const t = transferSides.find(

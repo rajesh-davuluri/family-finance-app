@@ -74,6 +74,9 @@ export function classifyBankLine(description: string, opts: { moneyIn: boolean; 
     if (/\bDES:\s*RENT\b|\bRENT\s*PAYMENT\b/i.test(d)) return { kind: "RENT", label: "Rent" };
   } else if (/\bPAYROLL\b|\bDIRECT DEP(OSIT)?\b|\bDES:\s*(SALARY|PAYROLL)\b/i.test(d)) {
     return { kind: "SALARY", label: "Paycheck" };
+  } else if (/\bPAYPAL\b.*\bTRANSFER\b/i.test(d)) {
+    // PayPal balance moved to the bank.
+    return { kind: "PAYPAL_TOPUP", label: "Money moved from PayPal" };
   }
 
   // Money moved to or from another of your own accounts, named on the line.
@@ -88,6 +91,9 @@ export function classifyBankLine(description: string, opts: { moneyIn: boolean; 
   const own = opts.ownNames.map((n) => n.trim().toUpperCase()).filter((n) => n.length >= 3);
   const zelle = d.match(/\bZelle payment (?:from|to) ([A-Z][A-Z .'-]+?)(?:\s+for\b|\s+Conf#|;|$)/i);
   if (zelle && own.some((n) => sameName(zelle[1], n))) return { kind: "OWN_TRANSFER", label: "Between your own accounts" };
+  // BofA's own transfer between your accounts: "TRANSFER RAJESH DAVULURI:RAJESH DAVULURI Confirmation# ...".
+  const named = d.match(/^TRANSFER ([A-Z][A-Z .'-]+?):([A-Z][A-Z .'-]+?)\s+Confirmation#/i);
+  if (named && own.some((n) => sameName(named[1], n) || sameName(named[2], n))) return { kind: "OWN_TRANSFER", label: "Between your own accounts" };
   if (/\bOnline Banking transfer (to|from) (CHK|SAV)\b|\bTRANSFER (TO|FROM) (CHECKING|SAVINGS)\b/i.test(d)) {
     return { kind: "OWN_TRANSFER", label: "Between your own accounts" };
   }

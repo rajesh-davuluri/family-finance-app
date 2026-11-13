@@ -47,7 +47,8 @@ export function targetForRule(
     }
     case "PAYPAL_TOPUP": {
       const paypal = accounts.find((i) => /paypal/i.test(i.name));
-      if (paypal && !moneyIn) return { label: rule.label, transferToId: paypal.id };
+      // To PayPal, or (money in) from it.
+      if (paypal) return { label: rule.label, transferToId: paypal.id };
       return category(byKind("TRANSFER"), proposed(moneyIn ? "Transfer In" : "Transfer Out", dir, "TRANSFER", "TRANSFERS"));
     }
     case "OWN_TRANSFER": {
