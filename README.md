@@ -10,6 +10,7 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Categories** — income/expense categories, seeded with sensible defaults on signup
 - **Transactions** — multi-currency, filterable, with notes
 - **Recurring transactions** — templates that auto-generate real transactions on a schedule (or on-demand via a "Generate now" button)
+- **Year ahead** — the big costs that don't come every month (premiums, a trip to India, school fees) turned into one amount to set aside from each paycheck, with the money set aside kept out of the planner's "safe to spend"
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 
 ## 1. Prerequisites

@@ -39,6 +39,11 @@ model Household {
   // forecast dips under it is flagged as tight.
   cashCushionUsd Decimal? @db.Decimal(12, 2)
 
+  // Year ahead: the money already set aside for the big irregular costs
+  // (PlannedExpense), and what the household means to add each paycheck.
+  yearAheadSetAsideUsd  Decimal? @db.Decimal(12, 2)
+  yearAheadPerPaydayUsd Decimal? @db.Decimal(12, 2)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
@@ -55,6 +60,7 @@ model Household {
   itemCategoryRules  ItemCategoryRule[]
   duplicateDecisions DuplicateDecision[]
   investmentAccounts InvestmentAccount[]
+  plannedExpenses    PlannedExpense[]
 }
 
 model User {
@@ -699,4 +705,27 @@ model PaycheckDetail {
   periodEnd     DateTime?   @db.Date
 
   updatedAt DateTime @updatedAt
+}
+
+// A big cost that doesn't come every month: a yearly premium, a trip to
+// India, school fees, car registration. The Year ahead page turns these into
+// an amount to set aside from each paycheck -- see src/lib/yearAhead.ts.
+model PlannedExpense {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name     String   @db.NVarChar(200)
+  amount   Decimal  @db.Decimal(12, 2)
+  currency String   @default("USD")
+  dueDate  DateTime // the next time it's due; "Mark as paid" moves a repeating one on
+  // Months between repeats (12 = every year, 6, 3); null for a one-time cost.
+  repeatMonths Int?
+  // Where it was added from, so it isn't suggested again and the payday
+  // planner doesn't count it twice: "policy:<id>", "tpl:<id>" or "bill:<key>".
+  sourceKey String? @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId])
 }

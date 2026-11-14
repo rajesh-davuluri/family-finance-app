@@ -6,6 +6,8 @@ import { Payday, biweeklyPaydays, buildCycles, expectedPaydays, isSalary } from 
 import { detectHouseholdRecurring } from "@/lib/recurringData";
 import { loadCards } from "@/lib/cardData";
 import { CashEvent, addDays, occurrences } from "@/lib/cashPlan";
+import { upcoming } from "@/lib/yearAhead";
+import { loadPlannedItems } from "@/lib/yearAheadData";
 
 // Gathers what the payday planner needs (src/lib/cashPlan.ts):
 //   cash      US bank accounts with a balance set, not an "Emergency..." one
@@ -16,6 +18,8 @@ import { CashEvent, addDays, occurrences } from "@/lib/cashPlan";
 //   loans     debts with a fixed instalment, unless already a bill above
 //   everyday  debit card / Zelle spending from the banks, per day (90 days,
 //             leaving out one-offs over $500)
+//   planned   the Year ahead page's big costs due in the window, and the
+//             money set aside for them
 
 const WINDOW = 30;
 const HISTORY = 90;
@@ -37,7 +41,7 @@ export async function loadCashPlanInputs(householdId: string, today: string) {
   const end = addDays(today, WINDOW - 1);
   const histFrom = new Date(Date.parse(`${today}T00:00:00Z`) - HISTORY * DAY);
 
-  const [instruments, incomeRows, templates, recent, cards, debts, recurring] = await Promise.all([
+  const [instruments, incomeRows, templates, recent, cards, debts, recurring, planned, household] = await Promise.all([
     prisma.paymentInstrument.findMany({ where: { householdId, archived: false } }),
     prisma.transaction.findMany({
       where: { householdId, category: { direction: "INCOME" } },
@@ -55,6 +59,8 @@ export async function loadCashPlanInputs(householdId: string, today: string) {
     loadCards(householdId, today),
     prisma.debt.findMany({ where: { householdId, status: "ACTIVE", installmentAmount: { not: null } }, include: { payments: { orderBy: { paymentDate: "desc" }, take: 1 } } }),
     detectHouseholdRecurring(householdId, today),
+    loadPlannedItems(householdId),
+    prisma.household.findUnique({ where: { id: householdId }, select: { yearAheadSetAsideUsd: true } }),
   ]);
 
   // Cash in the US banks.
@@ -198,5 +204,17 @@ export async function loadCashPlanInputs(householdId: string, today: string) {
     }
   }
 
-  return { today, cashUsd: r2(cashUsd), accounts, events, nextPayday, paycheckUsd, everydayDailyUsd, windowDays: WINDOW };
+  // Planned expenses (Year ahead) due in the window. One added from a
+  // recurring bill is already a bill above.
+  const plannedDue: { date: string; usd: number }[] = [];
+  for (const o of upcoming(planned, today, WINDOW - 1)) {
+    const date = o.overdue ? today : o.date;
+    plannedDue.push({ date, usd: o.usd });
+    const source = planned.find((p) => p.id === o.itemId)?.sourceKey ?? "";
+    if (source.startsWith("tpl:") || source.startsWith("bill:")) continue;
+    events.push({ key: `plan:${o.key}`, date, label: o.name, sub: o.overdue ? "planned · overdue" : "planned · year ahead", kind: "BILL", usd: o.usd });
+  }
+  const setAsideUsd = household?.yearAheadSetAsideUsd != null ? Number(household.yearAheadSetAsideUsd) : 0;
+
+  return { today, cashUsd: r2(cashUsd), accounts, events, nextPayday, paycheckUsd, everydayDailyUsd, windowDays: WINDOW, setAsideUsd, plannedDue };
 }
