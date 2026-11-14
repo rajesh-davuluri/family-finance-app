@@ -22,6 +22,8 @@ type Inputs = {
   everydayDailyUsd: number;
   windowDays: number;
   cushionUsd: number;
+  setAsideUsd: number;
+  plannedDue: { date: string; usd: number }[];
 };
 type Emergency = { cashUsd: number; target: number; targetMonths: number; essentialsMonthly: number; monthsCovered: number | null };
 
@@ -57,7 +59,7 @@ export default function PlanPage() {
   const saveUsd = num(save);
   const plans = useMemo(() => {
     if (!data) return null;
-    const base = { today: data.today, cashUsd: data.cashUsd, events: data.events, nextPayday: data.nextPayday, everydayDailyUsd: data.everydayDailyUsd, cushionUsd: data.cushionUsd, days: data.windowDays, cardsMinimumOnly: minimumOnly };
+    const base = { today: data.today, cashUsd: data.cashUsd, events: data.events, nextPayday: data.nextPayday, everydayDailyUsd: data.everydayDailyUsd, cushionUsd: data.cushionUsd, days: data.windowDays, cardsMinimumOnly: minimumOnly, setAsideUsd: data.setAsideUsd, plannedDue: data.plannedDue };
     return { before: cashPlan(base), after: cashPlan({ ...base, spendNowUsd: spendUsd, savePerPaydayUsd: saveUsd }) };
   }, [data, minimumOnly, spendUsd, saveUsd]);
 
@@ -119,7 +121,7 @@ export default function PlanPage() {
         </p>
         <details className="mt-3 border-t border-white/15 pt-2 text-sm">
           <summary className="cursor-pointer text-ink-300">
-            {usd(data.cashUsd)} in the bank − {usd(p.committed)} due before payday{p.whatIfNow > 0 ? ` − ${usd(p.whatIfNow)} what if` : ""}
+            {usd(data.cashUsd)} in the bank − {usd(p.committed)} due before payday{p.held > 0 ? ` − ${usd(p.held)} set aside for the year ahead` : ""}{p.whatIfNow > 0 ? ` − ${usd(p.whatIfNow)} what if` : ""}
           </summary>
           <ul className="mt-2 space-y-1">
             {p.dueBeforePayday.length === 0 && <li className="text-ink-300">Nothing due before payday.</li>}
@@ -131,6 +133,17 @@ export default function PlanPage() {
                 <span className="tabular-nums">−{usd(e.paid, 2)}</span>
               </li>
             ))}
+            {p.held > 0 && (
+              <li className="flex justify-between gap-3">
+                <span className="min-w-0 truncate">
+                  Set aside for the{" "}
+                  <Link href="/year-ahead" className="underline">
+                    year ahead
+                  </Link>
+                </span>
+                <span className="tabular-nums">−{usd(p.held, 2)}</span>
+              </li>
+            )}
           </ul>
         </details>
         <div className="mt-3 flex rounded-lg bg-white/10 p-0.5 text-xs" role="tablist" aria-label="Card bills">

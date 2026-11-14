@@ -24,6 +24,7 @@ const primaryLinks = [
 ];
 
 const moreLinks = [
+  { href: "/year-ahead", label: "Year ahead" },
   { href: "/cards", label: "Credit cards" },
   { href: "/reports", label: "Reports" },
   { href: "/investments", label: "Investments" },
@@ -43,6 +44,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
     title: "Money this month",
     links: [
       { href: "/plan", label: "Payday planner", hint: "Safe to spend, next 30 days, what ifs" },
+      { href: "/year-ahead", label: "Year ahead", hint: "Big yearly costs, set aside per paycheck" },
       { href: "/cards", label: "Credit cards", hint: "Statements, due dates, owed now" },
       { href: "/budgets", label: "Budgets", hint: "Limits by category" },
       { href: "/recurring", label: "Recurring bills", hint: "Rent, EMIs, subscriptions" },

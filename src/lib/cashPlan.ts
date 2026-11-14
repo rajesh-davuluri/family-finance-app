@@ -1,7 +1,8 @@
 // Payday planner and bill shock preview. Pure: the API route gathers the
 // inputs (src/lib/cashPlanData.ts), this works out
 //   - safe to spend until the next paycheck (bank cash less every bill, card
-//     payment and loan instalment due before it),
+//     payment and loan instalment due before it, and less the money set aside
+//     for the year ahead),
 //   - the bank cash day by day for the next 30 days, with paychecks in and
 //     bills, card payments and everyday debit spending out,
 //   - the days that cash dips under a cushion, and what pushes it there,
@@ -37,6 +38,10 @@ export type PlanInput = {
   cardsMinimumOnly?: boolean; // pay only the card minimums
   spendNowUsd?: number; // what if I spend $X now
   savePerPaydayUsd?: number; // what if I move $X to savings now and each payday
+  // Year ahead (src/lib/yearAhead.ts): money in the bank that's already set
+  // aside for the big irregular costs, and when those fall due.
+  setAsideUsd?: number;
+  plannedDue?: { date: string; usd: number }[];
 };
 
 export type PlanDay = { date: string; balance: number; events: (CashEvent & { paid: number })[]; everyday: number };
@@ -105,7 +110,11 @@ export function cashPlan(input: PlanInput) {
   const dueBeforePayday = before.filter((e) => !e.key.startsWith("whatif:"));
   const committed = r2(dueBeforePayday.reduce((s, e) => s + paidFor(e, minimumOnly), 0));
   const whatIfNow = r2(before.filter((e) => e.key.startsWith("whatif:")).reduce((s, e) => s + e.usd, 0));
-  const safe = r2(input.cashUsd - committed - whatIfNow);
+  // Money set aside for the year ahead isn't free either -- beyond what it
+  // pays for before payday, which is already in `committed`.
+  const plannedSoon = (input.plannedDue ?? []).filter((d) => (payday ? d.date < payday : d.date <= last)).reduce((s, d) => s + d.usd, 0);
+  const held = r2(Math.max(0, (input.setAsideUsd ?? 0) - plannedSoon));
+  const safe = r2(input.cashUsd - committed - whatIfNow - held);
   const daysToPayday = payday ? daysBetween(input.today, payday) : null;
 
   // Spells under the cushion, with the outflows that led into each.
@@ -141,6 +150,7 @@ export function cashPlan(input: PlanInput) {
     safe,
     committed,
     whatIfNow,
+    held,
     perDay: daysToPayday && daysToPayday > 0 ? r2(Math.max(0, safe) / daysToPayday) : null,
     daysToPayday,
     payday,
@@ -186,7 +196,7 @@ export function occurrences(next: string, frequency: string, intervalDays: numbe
   return out;
 }
 
-function addMonths(d: string, n: number) {
+export function addMonths(d: string, n: number) {
   const [y, m, day] = d.split("-").map(Number);
   const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
   return new Date(Date.UTC(y, m - 1 + n, Math.min(day, last))).toISOString().slice(0, 10);
