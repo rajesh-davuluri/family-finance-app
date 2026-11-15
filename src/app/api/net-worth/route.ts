@@ -47,6 +47,9 @@ export async function GET() {
     (sum, i, idx) => sum + toApproxUsd(currentInstrumentBalances[idx], i.currency),
     0
   );
+  // The part of that held in other currencies (rupees in India), at the
+  // approximate rate -- so the dashboard can say it's included.
+  const foreignCashUsd = trackedInstruments.reduce((sum, i, idx) => sum + (i.currency === "USD" ? 0 : toApproxUsd(currentInstrumentBalances[idx], i.currency)), 0);
   const assetsUsd = cashUsd + investmentsUsd;
 
   const debtInfo = (d: (typeof debts)[number]) => ({
@@ -97,6 +100,7 @@ export async function GET() {
   return NextResponse.json({
     assets: Math.round(assetsUsd * 100) / 100,
     cash: Math.round(cashUsd * 100) / 100,
+    foreignCash: Math.round(foreignCashUsd * 100) / 100,
     investments: Math.round(investmentsUsd * 100) / 100,
     liabilities: Math.round(liabilitiesUsd * 100) / 100,
     cardsOwed: Math.round(cardsOwedUsd * 100) / 100,
