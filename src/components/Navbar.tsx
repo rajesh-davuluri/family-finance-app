@@ -173,18 +173,19 @@ export default function Navbar() {
     <>
       <nav className="sticky top-0 z-30 bg-ink-900 pt-[env(safe-area-inset-top)] print:hidden lg:static">
         <div className="mx-auto flex max-w-6xl items-center px-4 py-3">
-          {/* Clicking the name reloads the current page (fresh data everywhere on it). */}
-          <a
-            href={pathname ?? "/dashboard"}
+          {/* The name goes home to the dashboard; already there, it reloads for fresh data. */}
+          <Link
+            href="/dashboard"
             onClick={(e) => {
+              if (pathname !== "/dashboard") return;
               e.preventDefault();
               window.location.reload();
             }}
-            title="Refresh this page"
+            title="Dashboard"
             className="font-display mr-8 whitespace-nowrap text-lg italic text-brand-300 hover:text-brand-100"
           >
             Family Finance
-          </a>
+          </Link>
 
           <div className="hidden flex-1 items-center gap-5 lg:flex">
             {primaryLinks.map((link) => (
