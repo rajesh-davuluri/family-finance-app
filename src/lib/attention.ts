@@ -8,6 +8,10 @@ const fmt = (n: number, currency = "USD") =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+// A budget is flagged once it's over by this much: $10, or 5% of the limit
+// if that's more.
+export const BUDGET_OVER_MIN_USD = 10;
+export const BUDGET_OVER_MIN_SHARE = 0.05;
 const dueWords = (d: number) => (d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` : d === 0 ? "due today" : d === 1 ? "due tomorrow" : `due in ${d} days`);
 
 export function attentionItems(input: {
@@ -51,7 +55,9 @@ export function attentionItems(input: {
     });
   }
   for (const b of input.budgets) {
-    if (b.limit > 0 && b.spent > b.limit + 0.005) {
+    // A few dollars over isn't worth a place next to a bill due this week:
+    // the Budgets page and the bar below still show it.
+    if (b.limit > 0 && b.spent - b.limit >= Math.max(BUDGET_OVER_MIN_USD, b.limit * BUDGET_OVER_MIN_SHARE)) {
       items.push({ key: `budget:${b.name}`, level: "medium", text: `${b.name} is ${fmt(b.spent - b.limit)} over its ${fmt(b.limit)} budget`, href: "/budgets" });
     }
   }

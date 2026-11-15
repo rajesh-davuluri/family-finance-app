@@ -152,7 +152,7 @@ export default function Overview({ onDrill, children }: { onDrill: (d: Drill) =>
             <ChangeBadge now={s.expense} before={before?.expense} upIsGood={false} />
           </button>
           <div className="rounded-lg bg-paper px-3 py-2.5">
-            <span className="block text-xs text-gray-500">Kept{rate != null ? ` · ${rate}%` : ""}</span>
+            <span className="block text-xs text-gray-500">{period === "last" ? "Kept" : "Kept so far"}{rate != null ? ` · ${rate}%` : ""}</span>
             <span className={`font-display block text-xl tabular-nums sm:text-2xl ${kept < 0 ? "text-expense-600" : ""}`}>{usd(kept)}</span>
             <ChangeBadge now={kept} before={before ? before.income - before.expense : null} upIsGood />
           </div>

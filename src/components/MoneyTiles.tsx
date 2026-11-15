@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/formatDate";
 import { money } from "@/lib/money";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot } from "@/lib/cards";
+import { CashEvent, cashPlan } from "@/lib/cashPlan";
 import MarkCardPaid from "@/components/MarkCardPaid";
 import type { Drill } from "@/components/dashboard/DrillSheet";
 
@@ -18,13 +19,19 @@ type Instrument = { id: string; name: string; type: string; currency: string; ar
 
 const short = (d: string) => formatDate(d, { month: "short", day: "numeric" });
 
-type PayCycle =
-  | { hasData: false }
-  | {
-      hasData: true;
-      nextPaycheck: { date: string; daysUntil: number };
-      upcomingBills: { id: string; categoryName: string; instrumentName: string; amount: string; currency: string; nextRunAt: string }[];
-    };
+// What /api/planner returns: the payday planner's inputs (src/lib/cashPlan.ts).
+type Planner = {
+  today: string;
+  cashUsd: number;
+  accounts: { name: string; usd: number | null; counted: boolean; note?: string }[];
+  events: CashEvent[];
+  nextPayday: string | null;
+  everydayDailyUsd: number;
+  windowDays: number;
+  cushionUsd: number;
+  setAsideUsd: number;
+  plannedDue: { date: string; usd: number }[];
+};
 
 function dueWhen(days: number) {
   if (days < 0) return `${-days}d overdue`;
@@ -49,7 +56,7 @@ function rank(c: Card) {
 
 export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }) {
   const [cards, setCards] = useState<Card[] | null>(null);
-  const [cycle, setCycle] = useState<PayCycle | null>(null);
+  const [planner, setPlanner] = useState<Planner | null>(null);
   const [banks, setBanks] = useState<Instrument[] | null>(null);
   const [paying, setPaying] = useState<Card | null>(null);
 
@@ -62,10 +69,10 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       .then((r) => (r.ok ? r.json() : []))
       .then((list: Instrument[]) => setBanks(list.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived)))
       .catch(() => setBanks([]));
-    fetch("/api/pay-cycle", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { hasData: false }))
-      .then(setCycle)
-      .catch(() => setCycle({ hasData: false }));
+    fetch("/api/planner", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setPlanner)
+      .catch(() => setPlanner(null));
   }, []);
 
   useEffect(() => {
@@ -86,35 +93,22 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
   for (const b of banks) if (b.currentBalance != null) inBank.set(b.currency, (inBank.get(b.currency) ?? 0) + Number(b.currentBalance));
   const missingBalance = banks.filter((b) => b.currentBalance == null);
 
-  // Safe to spend until payday (dollars): bank money, less the card
-  // statements due before the next paycheck and the recurring bills paid
-  // from a bank account before then. Bills due after payday come out of it.
-  const payday = cycle?.hasData ? cycle.nextPaycheck.date.slice(0, 10) : null;
-  const usdBanks = banks.filter((b) => b.currency === "USD" && b.currentBalance != null);
+  // Safe to spend until payday: the payday planner's own figure, so the
+  // dashboard and the Planner page always agree. Bank cash (not the emergency
+  // fund) less every bill, card payment and loan instalment due before the
+  // next paycheck, and less the money set aside for the year ahead.
   const safe = (() => {
-    if (!usdBanks.length) return null;
-    const rows: { key: string; label: string; sub?: string; amount: number; currency: string }[] = usdBanks.map((b) => ({
-      key: `bank:${b.id}`,
-      label: b.name,
-      sub: "in the bank now",
-      amount: Number(b.currentBalance),
-      currency: "USD",
-    }));
-    for (const c of billCards) {
-      const s = c.snapshot;
-      if (c.currency !== "USD" || s.leftOnStatement <= 0.005 || !s.statement) continue;
-      if (payday && s.statement.dueDate > payday) continue;
-      rows.push({ key: `card:${c.id}`, label: `${c.name} bill`, sub: `due ${short(s.statement.dueDate)}`, amount: -s.leftOnStatement, currency: "USD" });
-    }
-    if (cycle?.hasData) {
-      const bankNames = new Set(banks.map((b) => b.name));
-      for (const bill of cycle.upcomingBills) {
-        if (bill.currency !== "USD" || !bankNames.has(bill.instrumentName)) continue;
-        rows.push({ key: `bill:${bill.id}`, label: bill.categoryName, sub: `recurring · ${short(bill.nextRunAt.slice(0, 10))} · ${bill.instrumentName}`, amount: -Number(bill.amount), currency: "USD" });
-      }
-    }
-    return { amount: Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100, rows };
+    if (!planner || !planner.accounts.some((a) => a.counted)) return null;
+    const p = cashPlan({ ...planner, days: planner.windowDays });
+    const rows: { key: string; label: string; sub?: string; amount: number; currency: string }[] = planner.accounts
+      .filter((a) => a.counted && a.usd != null)
+      .map((a) => ({ key: `bank:${a.name}`, label: a.name, sub: "in the bank now", amount: a.usd!, currency: "USD" }));
+    for (const e of p.dueBeforePayday) rows.push({ key: e.key, label: e.label, sub: `due ${short(e.date)}${e.sub ? ` · ${e.sub}` : ""}`, amount: -e.paid, currency: "USD" });
+    if (p.held > 0) rows.push({ key: "held", label: "Set aside for the year ahead", sub: "big costs later in the year", amount: -p.held, currency: "USD" });
+    const left = planner.accounts.filter((a) => !a.counted && a.note && a.note !== "no balance set").map((a) => `${a.name} (${a.note})`);
+    return { amount: p.safe, rows, payday: p.payday, notCounted: left };
   })();
+  const payday = safe?.payday ?? null;
 
   // Enough columns that every bill fits in two rows beside the bank money
   // (three once there are more than a dozen); the tiles tighten up to match.
@@ -168,14 +162,14 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
             onClick={() =>
               onDrill?.({
                 kind: "list",
-                title: payday ? `Safe to spend until ${short(payday)}` : "After card bills",
-                subtitle: payday ? "Bank money less what's due before payday" : "Bank money less the card bills",
+                title: payday ? `Safe to spend until ${short(payday)}` : `Safe to spend · next ${planner?.windowDays ?? 30} days`,
+                subtitle: `Bank cash less what's due ${payday ? "before payday" : "in that time"}${safe.notCounted.length ? `. Not counted: ${safe.notCounted.join(", ")}` : ""}`,
                 rows: safe.rows,
               })
             }
             className="mt-3 flex w-full items-center justify-between gap-3 border-t border-white/15 pt-2 text-left text-sm"
           >
-            <span className="text-ink-300">{payday ? `Safe to spend until payday (${short(payday)})` : "After card bills"} ›</span>
+            <span className="text-ink-300">{payday ? `Safe to spend until payday (${short(payday)})` : "Safe to spend"} ›</span>
             <span className={`font-display text-lg tabular-nums ${safe.amount < 0 ? "text-red-300" : "text-brand-300"}`}>{money(safe.amount, "USD")}</span>
           </button>
         )}
@@ -185,7 +179,8 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       </div>
 
       {/* Every card bill at once, beside the bank money. */}
-      <div className="lg:col-span-2">
+      <div className="flex flex-col lg:col-span-2">
+        {billCards.length > 0 && <p className="mb-1.5 px-1 text-xs uppercase tracking-wide text-gray-500">Card bills · left to pay on each statement</p>}
         {/* Phone: one compact card, a row per bill. */}
         {billCards.length > 0 && (
           <ul className="divide-y rounded-xl border bg-white px-3 shadow-sm sm:hidden">
@@ -217,7 +212,7 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
         )}
 
         {/* Wider screens: a tile per bill, sized so they all fit beside the bank money. */}
-        <div className="hidden h-full grid-cols-4 gap-2 sm:grid lg:grid-cols-[repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as React.CSSProperties}>
+        <div className="hidden flex-1 grid-cols-4 gap-2 sm:grid lg:grid-cols-[repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as React.CSSProperties}>
           {billCards.map((c) => {
             const s = c.snapshot;
             const v = view(c);
