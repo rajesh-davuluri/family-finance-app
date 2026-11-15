@@ -5,7 +5,7 @@ import Link from "next/link";
 import { money } from "@/lib/money";
 
 // Net worth at a glance, each figure linking to its page.
-type NetWorth = { netWorth: number; investments: number; cash: number; liabilities: number };
+type NetWorth = { netWorth: number; investments: number; cash: number; foreignCash?: number; liabilities: number };
 
 export default function WealthLine() {
   const [w, setW] = useState<NetWorth | null>(null);
@@ -17,7 +17,8 @@ export default function WealthLine() {
   }, []);
   if (!w) return null;
   const cells: { label: string; value: number; href: string; note?: string }[] = [
-    { label: "Net worth", value: w.netWorth, href: "/net-worth" },
+    // Bank money in other currencies is in here too, converted roughly.
+    { label: "Net worth", value: w.netWorth, href: "/net-worth", note: w.foreignCash && Math.abs(w.foreignCash) >= 1 ? `incl. about ${money(w.foreignCash, "USD", 0)} held outside dollars` : undefined },
     { label: "Investments", value: w.investments, href: "/investments" },
     // Everything owed on the cards right now (not just the statements due)
     // plus what's left on loans -- so it's more than the card bills above.
