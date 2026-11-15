@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { calendarDateInZone } from "@/lib/appTimezone";
 import { toApproxUsd } from "@/lib/fx";
 import { countsAsSpending, flowOf, kindOf } from "@/lib/categoryKind";
 import { isEssential } from "@/lib/emergencyFund";
@@ -80,17 +81,23 @@ export async function GET(req: Request) {
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
-  const now = new Date();
-  const month = Number(searchParams.get("month")) || now.getMonth() + 1; // 1-12
-  const year = Number(searchParams.get("year")) || now.getFullYear();
+  // "Now" is the household's calendar day, and dates are stored as UTC
+  // midnights -- the same clock as the dashboard's day-by-day line
+  // (daily-spend), so the two totals agree.
+  const today = calendarDateInZone();
+  const [ty, tm, td] = today.split("-").map(Number);
+  const month = Number(searchParams.get("month")) || tm; // 1-12
+  const year = Number(searchParams.get("year")) || ty;
 
-  const monthStart = new Date(year, month - 1, 1);
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
   // ?upto=9: the month up to its 9th day, to compare with this month so far.
-  const upto = Number(searchParams.get("upto")) || 0;
-  const monthEnd = upto > 0 ? new Date(year, month - 1, Math.min(upto, new Date(year, month, 0).getDate()) + 1) : new Date(year, month, 1); // exclusive
+  // The current month always stops at today: anything dated later hasn't
+  // happened yet.
+  const upto = Number(searchParams.get("upto")) || (year === ty && month === tm ? td : 0);
+  const monthEnd = upto > 0 ? new Date(Date.UTC(year, month - 1, Math.min(upto, new Date(Date.UTC(year, month, 0)).getUTCDate()) + 1)) : new Date(Date.UTC(year, month, 1)); // exclusive
 
-  const yearStart = new Date(year, 0, 1);
-  const yearEnd = year === now.getFullYear() ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : new Date(year + 1, 0, 1);
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearEnd = year === ty ? new Date(Date.UTC(ty, tm - 1, td + 1)) : new Date(Date.UTC(year + 1, 0, 1));
 
   const [monthlyTxns, ytdTxns] = await Promise.all([
     prisma.transaction.findMany({
