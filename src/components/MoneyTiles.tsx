@@ -32,6 +32,13 @@ function dueWhen(days: number) {
   if (days === 1) return "due tomorrow";
   return `in ${days} days`;
 }
+// The same, for a narrow tile.
+function dueShort(days: number) {
+  if (days < 0) return `${-days}d overdue`;
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `${days}d`;
+}
 
 // Overdue first, then soonest due; paid and not-yet-set-up cards last.
 function rank(c: Card) {
@@ -109,10 +116,33 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
     return { amount: Math.round(rows.reduce((t, r) => t + r.amount, 0) * 100) / 100, rows };
   })();
 
+  // Enough columns that every bill fits in two rows beside the bank money
+  // (three once there are more than a dozen); the tiles tighten up to match.
+  const n = billCards.length;
+  const cols = n <= 4 ? 2 : n <= 12 ? Math.ceil(n / 2) : Math.ceil(n / 3);
+  const dense = cols >= 4;
+  const view = (c: Card) => {
+    const s = c.snapshot;
+    const st = s.statement!;
+    const paid = s.status === "PAID" || s.status === "NOTHING_DUE";
+    const urgent = s.status === "OVERDUE" || (s.status === "DUE" && (s.daysToDue ?? 99) <= 5);
+    const on = `${st.dueDateApprox ? "~" : ""}${short(st.dueDate)}`;
+    const estimated = st.basis === "ESTIMATED";
+    return {
+      st,
+      paid,
+      estimated,
+      due: `Due ${on} · ${dueWhen(s.daysToDue ?? 0)}`,
+      dueShort: `${on} · ${dueShort(s.daysToDue ?? 0)}${estimated ? " · est." : ""}`,
+      tone: paid ? "text-income-600" : s.status === "OVERDUE" ? "font-medium text-expense-600" : urgent ? "font-medium text-amber-700" : "text-gray-500",
+      border: s.status === "OVERDUE" ? "border-expense-500" : urgent ? "border-amber-400" : "",
+    };
+  };
+
   return (
-    <section aria-label="Bank money and card bills" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <section aria-label="Bank money and card bills" className="grid gap-3 lg:grid-cols-3">
       {/* Money in the bank */}
-      <div className="col-span-2 rounded-xl bg-ink-900 p-4 text-white shadow-sm lg:row-span-2">
+      <div className="rounded-xl bg-ink-900 p-4 text-white shadow-sm">
         <Link href="/instruments" className="text-xs uppercase tracking-wide text-ink-300 underline-offset-2 hover:underline">
           Available in banks
         </Link>
@@ -154,65 +184,96 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
         )}
       </div>
 
-      {/* One tile per card bill */}
-      {billCards.map((c) => {
-        const s = c.snapshot;
-        const st = s.statement!;
-        const paid = s.status === "PAID" || s.status === "NOTHING_DUE";
-        const urgent = s.status === "OVERDUE" || (s.status === "DUE" && (s.daysToDue ?? 99) <= 5);
-        return (
-          <div
-            key={c.id}
-            className={`relative flex flex-col rounded-xl border bg-white p-3 shadow-sm ${s.status === "OVERDUE" ? "border-expense-500" : urgent ? "border-amber-400" : ""}`}
-          >
-            {/* The whole tile opens Credit cards; the button sits above the link. */}
-            <Link href="/cards" className="absolute inset-0 rounded-xl active:bg-gray-50/60" aria-label={`${c.name} on Credit cards`} />
-            <p className="truncate text-xs text-gray-500">
-              {c.name}
-              {c.last4 && <span className="text-gray-400"> ••{c.last4}</span>}
-            </p>
-            {paid ? (
-              <>
-                <p className="font-display mt-1 text-xl text-income-600">Paid ✓</p>
-                <p className="text-xs text-gray-500">
-                  {money(st.balance, c.currency)} bill · next closes {short(s.nextClose!)}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="font-display mt-1 text-xl tabular-nums">{money(s.leftOnStatement, c.currency)}</p>
-                <p className={`text-xs ${s.status === "OVERDUE" ? "font-medium text-expense-600" : urgent ? "font-medium text-amber-700" : "text-gray-500"}`}>
-                  Due {st.dueDateApprox ? "~" : ""}
-                  {short(st.dueDate)} · {dueWhen(s.daysToDue ?? 0)}
-                </p>
-                {s.minimumLeft != null && s.minimumLeft > 0.005 && (
-                  <p className="text-xs text-gray-400">min {money(s.minimumLeft, c.currency)}</p>
-                )}
-              </>
-            )}
-            {st.basis === "ESTIMATED" && <p className="mt-0.5 text-[11px] text-gray-400">estimated</p>}
-            {!paid && (
-              <button
-                onClick={() => setPaying(c)}
-                className="relative mt-2 self-start rounded-md border border-brand-400 px-2.5 py-1 text-xs font-medium text-brand-700 active:bg-brand-50"
-              >
-                Mark paid
-              </button>
-            )}
-          </div>
-        );
-      })}
+      {/* Every card bill at once, beside the bank money. */}
+      <div className="lg:col-span-2">
+        {/* Phone: one compact card, a row per bill. */}
+        {billCards.length > 0 && (
+          <ul className="divide-y rounded-xl border bg-white px-3 shadow-sm sm:hidden">
+            {billCards.map((c) => {
+              const v = view(c);
+              return (
+                <li key={c.id} className="relative flex items-center gap-3 py-2">
+                  <Link href="/cards" className="absolute inset-0 active:bg-gray-50/60" aria-label={`${c.name} on Credit cards`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">
+                      {c.name}
+                      {c.last4 && <span className="text-gray-400"> ••{c.last4}</span>}
+                    </p>
+                    <p className={`truncate text-xs ${v.tone}`}>{v.paid ? `Paid ✓ · next closes ${short(c.snapshot.nextClose!)}` : v.due}</p>
+                  </div>
+                  <p className={`shrink-0 text-right tabular-nums ${v.paid ? "text-gray-400" : "font-medium"}`}>
+                    {money(v.paid ? v.st.balance : c.snapshot.leftOnStatement, c.currency)}
+                    {v.estimated && <span className="block text-[10px] font-normal text-gray-400">estimated</span>}
+                  </p>
+                  {!v.paid && (
+                    <button onClick={() => setPaying(c)} className="relative shrink-0 rounded-md border border-brand-400 px-2 py-1.5 text-xs font-medium text-brand-700 active:bg-brand-50">
+                      Mark paid
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-      {cards.length > 0 && billCards.length === 0 && (
-        <Link href="/cards" className="col-span-2 rounded-xl border border-dashed bg-white p-3 text-sm text-gray-600">
-          Set each card&apos;s statement closing day on Credit cards to see bills and due dates here.
-        </Link>
-      )}
-      {notSetUp > 0 && billCards.length > 0 && (
-        <Link href="/cards" className="col-span-2 self-center px-1 text-xs text-gray-500 underline lg:col-span-2">
-          {notSetUp} more card{notSetUp === 1 ? "" : "s"} not set up yet
-        </Link>
-      )}
+        {/* Wider screens: a tile per bill, sized so they all fit beside the bank money. */}
+        <div className="hidden h-full grid-cols-4 gap-2 sm:grid lg:grid-cols-[repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as React.CSSProperties}>
+          {billCards.map((c) => {
+            const s = c.snapshot;
+            const v = view(c);
+            return (
+              <div key={c.id} className={`relative flex min-w-0 flex-col rounded-xl border bg-white shadow-sm ${dense ? "p-2.5" : "p-3"} ${v.border}`}>
+                {/* The whole tile opens Credit cards; the button sits above the link. */}
+                <Link href="/cards" className="absolute inset-0 rounded-xl active:bg-gray-50/60" aria-label={`${c.name} on Credit cards`} />
+                <p className="truncate text-xs text-gray-500" title={c.name}>
+                  {c.name}
+                  {c.last4 && <span className="text-gray-400"> ••{c.last4}</span>}
+                </p>
+                {v.paid ? (
+                  <>
+                    <p className={`font-display mt-0.5 text-income-600 ${dense ? "text-lg" : "text-xl"}`}>Paid ✓</p>
+                    <p className="truncate text-xs text-gray-500" title={`${money(v.st.balance, c.currency)} bill · next closes ${short(s.nextClose!)}`}>
+                      {dense ? `next closes ${short(s.nextClose!)}` : `${money(v.st.balance, c.currency)} bill · next closes ${short(s.nextClose!)}`}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className={`font-display mt-0.5 truncate tabular-nums ${dense ? "text-lg" : "text-xl"}`}>{money(s.leftOnStatement, c.currency)}</p>
+                    <p className={`truncate text-xs ${v.tone}`} title={v.due}>
+                      {dense ? v.dueShort : v.due}
+                    </p>
+                    {!dense && s.minimumLeft != null && s.minimumLeft > 0.005 && <p className="text-xs text-gray-400">min {money(s.minimumLeft, c.currency)}</p>}
+                  </>
+                )}
+                {v.estimated && !dense && <p className="mt-0.5 text-[11px] text-gray-400">estimated</p>}
+                {!v.paid && (
+                  <button
+                    onClick={() => setPaying(c)}
+                    className={`relative mt-auto self-start rounded-md border border-brand-400 font-medium text-brand-700 hover:bg-brand-50 active:bg-brand-50 ${dense ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"}`}
+                  >
+                    Mark paid
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {cards.length > 0 && billCards.length === 0 && (
+            <Link href="/cards" className="col-span-full self-start rounded-xl border border-dashed bg-white p-3 text-sm text-gray-600">
+              Set each card&apos;s statement closing day on Credit cards to see bills and due dates here.
+            </Link>
+          )}
+        </div>
+        {cards.length > 0 && billCards.length === 0 && (
+          <Link href="/cards" className="block rounded-xl border border-dashed bg-white p-3 text-sm text-gray-600 sm:hidden">
+            Set each card&apos;s statement closing day on Credit cards to see bills and due dates here.
+          </Link>
+        )}
+        {notSetUp > 0 && billCards.length > 0 && (
+          <Link href="/cards" className="mt-2 block px-1 text-xs text-gray-500 underline">
+            {notSetUp} more card{notSetUp === 1 ? "" : "s"} not set up yet
+          </Link>
+        )}
+      </div>
       {paying && (
         <MarkCardPaid
           card={paying}
