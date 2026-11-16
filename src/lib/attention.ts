@@ -12,6 +12,9 @@ const fmt = (n: number, currency = "USD") =>
 // if that's more.
 export const BUDGET_OVER_MIN_USD = 10;
 export const BUDGET_OVER_MIN_SHARE = 0.05;
+// A balance check older than this is worth repeating (a statement cycle and
+// a bit).
+export const CHECK_STALE_DAYS = 45;
 const dueWords = (d: number) => (d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue` : d === 0 ? "due today" : d === 1 ? "due tomorrow" : `due in ${d} days`);
 
 export function attentionItems(input: {
@@ -21,6 +24,9 @@ export function attentionItems(input: {
   cardBillsUsd: number;
   likelyDuplicates: number;
   stale: { name: string; lastDate: string; days: number }[];
+  // Bank accounts whose last check against the bank no longer holds, or was
+  // made a long time ago (src/lib/balanceCheck.ts).
+  checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number }[];
   // The payday planner's first dip under the cushion in the next 30 days
   // (src/lib/cashPlan.ts); when the planner ran, it replaces the rougher
   // "banks short of the card bills" check.
@@ -68,6 +74,11 @@ export function attentionItems(input: {
       text: `${input.likelyDuplicates} likely duplicate transaction${input.likelyDuplicates === 1 ? "" : "s"} to review`,
       href: "/transactions",
     });
+  }
+  for (const c of input.checks ?? []) {
+    const on = new Date(`${c.asOfDate}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    if (!c.matched) items.push({ key: `check:${c.name}`, level: "medium", text: `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${on}`, href: "/instruments" });
+    else if (c.daysSince >= CHECK_STALE_DAYS) items.push({ key: `check-old:${c.name}`, level: "medium", text: `${c.name} was last checked against the bank ${c.daysSince} days ago`, href: "/instruments" });
   }
   for (const s of input.stale) {
     items.push({ key: `stale:${s.name}`, level: "medium", text: `${s.name}: nothing new for ${s.days} days — import a statement?`, href: "/import" });

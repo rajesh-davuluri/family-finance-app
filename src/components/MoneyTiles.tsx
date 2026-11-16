@@ -15,7 +15,7 @@ import type { Drill } from "@/components/dashboard/DrillSheet";
 // page); bank balances from /api/instruments (opening balance + activity).
 
 type Card = { id: string; name: string; last4: string | null; currency: string; snapshot: CardSnapshot };
-type Instrument = { id: string; name: string; type: string; currency: string; archived: boolean; currentBalance: number | null };
+type Instrument = { id: string; name: string; type: string; currency: string; archived: boolean; currentBalance: number | null; lastCheck?: { matched: boolean; daysSince: number; asOfDate: string } | null };
 
 const short = (d: string) => formatDate(d, { month: "short", day: "numeric" });
 
@@ -157,7 +157,20 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
         <ul className="mt-3 space-y-1 text-sm">
           {banks.map((b) => (
             <li key={b.id} className="flex justify-between gap-3">
-              <span className="truncate text-ink-300">{b.name}</span>
+              <span className="truncate text-ink-300">
+                {b.name}
+                {/* Checked against the bank's own balance (Accounts & cards). */}
+                {b.lastCheck && !b.lastCheck.matched && (
+                  <span className="ml-1 text-red-300" title="Doesn't match the bank's balance">
+                    ⚠
+                  </span>
+                )}
+                {b.lastCheck?.matched && b.lastCheck.daysSince < 45 && (
+                  <span className="ml-1 text-brand-300" title={`Matches the bank as of ${short(b.lastCheck.asOfDate)}`}>
+                    ✓
+                  </span>
+                )}
+              </span>
               <span className="tabular-nums">{b.currentBalance == null ? <span className="text-ink-300">set balance</span> : money(Number(b.currentBalance), b.currency)}</span>
             </li>
           ))}

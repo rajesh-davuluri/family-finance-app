@@ -131,6 +131,7 @@ model PaymentInstrument {
   importBatches      ImportBatch[]
   details            AccountDetails?
   cardStatements     CardStatement[]
+  balanceChecks      BalanceCheck[]
 
   createdAt   DateTime @default(now())
 }
@@ -728,4 +729,24 @@ model PlannedExpense {
   createdAt DateTime @default(now())
 
   @@index([householdId])
+}
+
+// A bank account's balance checked against the bank's own figure: what the
+// bank showed as of a date, and what the app worked out for that date at the
+// time. The latest one is re-tested whenever the accounts are listed, so an
+// edit that moves the balance afterwards shows up -- see src/lib/balanceCheck.ts.
+model BalanceCheck {
+  id           String            @id @default(uuid())
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  asOfDate    DateTime
+  bankBalance Decimal  @db.Decimal(12, 2)
+  appBalance  Decimal  @db.Decimal(12, 2) // the app's figure for that date when checked
+  // True when the bank's figure was then taken as the new starting balance.
+  adjusted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([instrumentId, createdAt])
 }

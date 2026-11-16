@@ -6,6 +6,7 @@ import Link from "next/link";
 import { money } from "@/lib/money";
 import AccountDetailsPanel from "@/components/AccountDetailsPanel";
 import BalanceBreakdown from "@/components/BalanceBreakdown";
+import BalanceCheckPanel, { CheckBadge, type LastCheck } from "@/components/BalanceCheckPanel";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 
@@ -21,6 +22,8 @@ type Instrument = {
   openingBalance: string | null;
   openingBalanceDate: string | null;
   currentBalance: number | null;
+  // The last check against the bank's own balance, re-tested now.
+  lastCheck?: LastCheck | null;
   // True when a credit card has no starting balance and currentBalance is
   // just the sum of its transactions and transfers in the app.
   balanceFromTransactionsOnly: boolean;
@@ -59,6 +62,8 @@ export default function InstrumentsPage() {
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
   // An account whose balance breakdown is open.
   const [howId, setHowId] = useState<string | null>(null);
+  // An account being checked against the bank.
+  const [checkId, setCheckId] = useState<string | null>(null);
   // Which instrument's details (bank, IFSC, account number...) are open.
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [balanceForm, setBalanceForm] = useState({ amount: "", date: getTodayLocal() });
@@ -100,6 +105,13 @@ export default function InstrumentsPage() {
       toInstrumentId: f.toInstrumentId || insts.filter((i) => !i.archived)[1]?.id || "",
     }));
     setLoading(false);
+  }
+
+  // After a balance check: fresh balances and check results, without the
+  // page blanking to "Loading..." (which would close the open check).
+  async function refreshInstruments() {
+    const res = await fetch("/api/instruments");
+    if (res.ok) setInstruments(await res.json());
   }
 
   useEffect(() => {
@@ -355,6 +367,16 @@ export default function InstrumentsPage() {
                       {howId === i.id ? "hide" : "how?"}
                     </button>
                   )}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.currentBalance !== null && i.openingBalanceDate && !i.archived && (
+                    <button onClick={() => setCheckId(checkId === i.id ? null : i.id)} className="ml-2 text-xs text-brand-600 hover:underline">
+                      {checkId === i.id ? "close" : "check"}
+                    </button>
+                  )}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.lastCheck && (
+                    <span className="mt-0.5 block">
+                      <CheckBadge check={i.lastCheck} currency={i.currency} />
+                    </span>
+                  )}
                   {i.type === "CREDIT_CARD" || editingBalanceId === i.id || i.currentBalance !== null ? null : (
                     <button onClick={() => startEditingBalance(i)} className="text-xs text-brand-600 hover:underline">
                       Set balance
@@ -393,6 +415,15 @@ export default function InstrumentsPage() {
                     ) : (
                       <BalanceBreakdown instrumentId={i.id} since={i.openingBalanceDate!.slice(0, 10)} opening={i.openingBalance == null ? null : Number(i.openingBalance)} currency={i.currency} />
                     )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {checkId === i.id && i.type !== "CREDIT_CARD" && i.openingBalanceDate && editingBalanceId !== i.id && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6} className="px-3 py-3">
+                    <div className="sticky left-3 max-w-[calc(100vw-3.5rem)] sm:max-w-2xl">
+                      <BalanceCheckPanel instrumentId={i.id} name={i.name} currency={i.currency} since={i.openingBalanceDate.slice(0, 10)} lastCheck={i.lastCheck ?? null} onChanged={refreshInstruments} />
                     </div>
                   </td>
                 </tr>

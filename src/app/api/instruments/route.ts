@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { InstrumentType, Currency } from "@/lib/enums";
 import { computeInstrumentBalance } from "@/lib/balanceCalculations";
+import { loadCheckStatuses } from "@/lib/balanceCheckData";
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -34,6 +35,8 @@ export async function GET() {
   // missing activity from before the app's records begin. Other instrument
   // types have no such fallback -- a bank account's starting money can't be
   // guessed.
+  // The last time each account was checked against the bank, re-tested now.
+  const checks = await loadCheckStatuses(instruments.filter((i) => i.type !== "CREDIT_CARD"));
   const withBalance = await Promise.all(
     instruments.map(async (i) => {
       const hasOpening = i.openingBalance !== null && i.openingBalanceDate !== null;
@@ -46,6 +49,7 @@ export async function GET() {
             ? await computeInstrumentBalance(i.id, 0, new Date(0))
             : null,
         balanceFromTransactionsOnly: fallback,
+        lastCheck: checks.get(i.id) ?? null,
       };
     })
   );
