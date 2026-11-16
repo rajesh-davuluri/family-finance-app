@@ -126,6 +126,11 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       st,
       paid,
       estimated,
+      // Owed on the card right now, and the part of it not on a statement
+      // yet (charges since it closed, less refunds), so billed + unbilled
+      // always add up to the total.
+      total: s.outstanding ?? s.leftOnStatement,
+      unbilled: Math.round(((s.outstanding ?? s.leftOnStatement) - s.leftOnStatement) * 100) / 100,
       due: `Due ${on} · ${dueWhen(s.daysToDue ?? 0)}`,
       dueShort: `${on} · ${dueShort(s.daysToDue ?? 0)}${estimated ? " · est." : ""}`,
       tone: paid ? "text-income-600" : s.status === "OVERDUE" ? "font-medium text-expense-600" : urgent ? "font-medium text-amber-700" : "text-gray-500",
@@ -180,14 +185,15 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
 
       {/* Every card bill at once, beside the bank money. */}
       <div className="flex flex-col lg:col-span-2">
-        {billCards.length > 0 && <p className="mb-1.5 px-1 text-xs uppercase tracking-wide text-gray-500">Card bills · left to pay on each statement</p>}
+        {billCards.length > 0 && <p className="mb-1.5 px-1 text-xs uppercase tracking-wide text-gray-500">Card bills · billed, unbilled and total owed</p>}
         {/* Phone: one compact card, a row per bill. */}
         {billCards.length > 0 && (
           <ul className="divide-y rounded-xl border bg-white px-3 shadow-sm sm:hidden">
             {billCards.map((c) => {
               const v = view(c);
               return (
-                <li key={c.id} className="relative flex items-center gap-3 py-2">
+                <li key={c.id} className="relative py-2">
+                  <div className="flex items-center gap-3">
                   <Link href="/cards" className="absolute inset-0 active:bg-gray-50/60" aria-label={`${c.name} on Credit cards`} />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm">
@@ -197,6 +203,7 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
                     <p className={`truncate text-xs ${v.tone}`}>{v.paid ? `Paid ✓ · next closes ${short(c.snapshot.nextClose!)}` : v.due}</p>
                   </div>
                   <p className={`shrink-0 text-right tabular-nums ${v.paid ? "text-gray-400" : "font-medium"}`}>
+                    <span className="block text-[10px] font-normal uppercase tracking-wide text-gray-400">{v.paid ? "Bill was" : "Billed"}</span>
                     {money(v.paid ? v.st.balance : c.snapshot.leftOnStatement, c.currency)}
                     {v.estimated && <span className="block text-[10px] font-normal text-gray-400">estimated</span>}
                   </p>
@@ -205,6 +212,13 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
                       Mark paid
                     </button>
                   )}
+                  </div>
+                  <p className="mt-0.5 flex justify-between gap-3 text-xs tabular-nums text-gray-500">
+                    <span>Unbilled {money(v.unbilled, c.currency)}</span>
+                    <span>
+                      Total owed <span className="font-medium text-ink-900">{money(v.total, c.currency)}</span>
+                    </span>
+                  </p>
                 </li>
               );
             })}
@@ -233,7 +247,10 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
                   </>
                 ) : (
                   <>
-                    <p className={`font-display mt-0.5 truncate tabular-nums ${dense ? "text-lg" : "text-xl"}`}>{money(s.leftOnStatement, c.currency)}</p>
+                    <p className="mt-1 text-[10px] uppercase leading-none tracking-wide text-gray-400">Billed</p>
+                    <p className={`font-display truncate tabular-nums ${dense ? "text-lg" : "text-xl"}`} title="Billed: left to pay on the statement">
+                      {money(s.leftOnStatement, c.currency)}
+                    </p>
                     <p className={`truncate text-xs ${v.tone}`} title={v.due}>
                       {dense ? v.dueShort : v.due}
                     </p>
@@ -241,10 +258,21 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
                   </>
                 )}
                 {v.estimated && !dense && <p className="mt-0.5 text-[11px] text-gray-400">estimated</p>}
+                {/* Not on a statement yet, and everything owed on the card now. */}
+                <dl className={`mt-1.5 space-y-0.5 border-t pt-1.5 tabular-nums ${dense ? "text-[11px]" : "text-xs"}`}>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Unbilled</dt>
+                    <dd className="truncate">{money(v.unbilled, c.currency)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Total</dt>
+                    <dd className="truncate font-medium">{money(v.total, c.currency)}</dd>
+                  </div>
+                </dl>
                 {!v.paid && (
                   <button
                     onClick={() => setPaying(c)}
-                    className={`relative mt-auto self-start rounded-md border border-brand-400 font-medium text-brand-700 hover:bg-brand-50 active:bg-brand-50 ${dense ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"}`}
+                    className={`relative mt-2 self-start rounded-md border border-brand-400 font-medium text-brand-700 hover:bg-brand-50 active:bg-brand-50 ${dense ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-1 text-xs"}`}
                   >
                     Mark paid
                   </button>
