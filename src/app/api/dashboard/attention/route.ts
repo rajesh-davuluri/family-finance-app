@@ -8,6 +8,7 @@ import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { loadForDuplicateCheck, pairKey, settledPairs } from "@/lib/duplicateData";
 import { findPairs } from "@/lib/duplicates";
 import { attentionItems } from "@/lib/attention";
+import { loadCheckStatuses } from "@/lib/balanceCheckData";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
 
@@ -84,6 +85,13 @@ export async function GET() {
     };
   }
 
+  const banks = instruments.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived);
+  const checkStatuses = await loadCheckStatuses(banks);
+  const checks = banks.flatMap((b) => {
+    const c = checkStatuses.get(b.id);
+    return c ? [{ name: b.name, currency: b.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince }] : [];
+  });
+
   const items = attentionItems({
     cards: cards.map((c) => ({ name: c.name, currency: c.currency, leftOnStatement: c.snapshot.leftOnStatement, daysToDue: c.snapshot.daysToDue })),
     budgets: budgets.map((b) => ({ name: b.category.name, limit: Number(b.monthlyLimit), spent: spent.get(b.categoryId) ?? 0 })),
@@ -92,6 +100,7 @@ export async function GET() {
     likelyDuplicates,
     stale,
     cashPlan: plan,
+    checks,
   });
   return NextResponse.json({ items });
 }
