@@ -8,6 +8,7 @@ import { computeInstrumentBalance } from "@/lib/balanceCalculations";
 import { loadForDuplicateCheck, pairKey, settledPairs } from "@/lib/duplicateData";
 import { findPairs } from "@/lib/duplicates";
 import { attentionItems } from "@/lib/attention";
+import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 import { loadCheckStatuses } from "@/lib/balanceCheckData";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
@@ -24,15 +25,17 @@ export async function GET() {
   const householdId = user.householdId;
   const today = calendarDateInZone();
   const todayMs = Date.parse(`${today}T00:00:00Z`);
-  const monthStart = new Date(`${today.slice(0, 8)}01T00:00:00Z`);
+  const [ty, tm] = [Number(today.slice(0, 4)), Number(today.slice(5, 7))];
+  const yearBack = new Date(Date.UTC(ty, tm - 1 - 12, 1));
 
-  const [cards, instruments, budgets, monthTxns, latest, dupTxns, settled] = await Promise.all([
+  const [cards, instruments, budgets, yearTxns, latest, dupTxns, settled] = await Promise.all([
     loadCards(householdId, today),
     prisma.paymentInstrument.findMany({ where: { householdId, archived: false } }),
     prisma.budget.findMany({ where: { householdId }, include: { category: true } }),
+    // This month and the twelve before it, for each category's own marks.
     prisma.transaction.findMany({
-      where: { householdId, date: { gte: monthStart }, category: { direction: "EXPENSE" } },
-      select: { categoryId: true, amount: true, currency: true },
+      where: { householdId, date: { gte: yearBack }, category: { direction: "EXPENSE" } },
+      select: { categoryId: true, amount: true, currency: true, date: true, category: { select: { name: true, direction: true, kind: true } } },
     }),
     prisma.transaction.groupBy({ by: ["instrumentId"], where: { householdId }, _max: { date: true } }),
     loadForDuplicateCheck(householdId, new Date(todayMs - 180 * DAY).toISOString().slice(0, 10), today),
@@ -50,8 +53,37 @@ export async function GET() {
     .filter((c) => c.currency === "USD" && c.snapshot.daysToDue != null && c.snapshot.daysToDue <= 14)
     .reduce((t, c) => t + c.snapshot.leftOnStatement, 0);
 
-  const spent = new Map<string, number>();
-  for (const t of monthTxns) spent.set(t.categoryId, (spent.get(t.categoryId) ?? 0) + toApproxUsd(Number(t.amount), t.currency));
+  // Each spending category by month: this month so far, last month, and the
+  // average of the full months on record in the past year.
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = new Date(Date.UTC(ty, tm - 2, 1)).toISOString().slice(0, 7);
+  const byCategory = new Map<string, { name: string; months: Map<string, number> }>();
+  let firstMonth = thisMonth;
+  for (const t of yearTxns) {
+    const day = t.date.toISOString().slice(0, 10);
+    if (day > today) continue; // dated ahead: hasn't happened yet
+    const month = day.slice(0, 7);
+    if (month < firstMonth) firstMonth = month;
+    const kind = kindOf(t.category);
+    if (!countsAsSpending(kind) || kind === "REFUND") continue;
+    const c = byCategory.get(t.categoryId) ?? { name: t.category.name, months: new Map<string, number>() };
+    c.months.set(month, (c.months.get(month) ?? 0) + toApproxUsd(Number(t.amount), t.currency));
+    byCategory.set(t.categoryId, c);
+  }
+  // Full months with records at all (a newer household has fewer than 12).
+  const fullMonths = ty * 12 + tm - 1 - (Number(firstMonth.slice(0, 4)) * 12 + Number(firstMonth.slice(5, 7)) - 1);
+  const limits = new Map(budgets.map((b) => [b.categoryId, Number(b.monthlyLimit)]));
+  const categories = [...byCategory.entries()].map(([id, c]) => {
+    const earlier = [...c.months.entries()].filter(([m]) => m < thisMonth).reduce((sum, [, v]) => sum + v, 0);
+    return {
+      name: c.name,
+      spent: c.months.get(thisMonth) ?? 0,
+      limit: limits.get(id) ?? null,
+      lastMonth: fullMonths >= 1 ? (c.months.get(lastMonth) ?? 0) : null,
+      // An average of one or two months is just those months again.
+      average: fullMonths >= 3 ? earlier / fullMonths : null,
+    };
+  });
 
   const split = new Map(dupTxns.map((t) => [t.id, !!t.splitGroupId]));
   const likelyDuplicates = findPairs(dupTxns, (a, b) => settled.has(pairKey(a, b))).filter(
@@ -94,7 +126,7 @@ export async function GET() {
 
   const items = attentionItems({
     cards: cards.map((c) => ({ name: c.name, currency: c.currency, leftOnStatement: c.snapshot.leftOnStatement, daysToDue: c.snapshot.daysToDue })),
-    budgets: budgets.map((b) => ({ name: b.category.name, limit: Number(b.monthlyLimit), spent: spent.get(b.categoryId) ?? 0 })),
+    categories,
     bankUsd,
     cardBillsUsd,
     likelyDuplicates,
