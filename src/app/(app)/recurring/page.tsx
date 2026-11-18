@@ -58,7 +58,6 @@ export default function RecurringPage() {
     setForm((f) => ({
       ...f,
       categoryId: f.categoryId || cats[0]?.id || "",
-      instrumentId: f.instrumentId || insts.find((i: Instrument) => !i.archived)?.id || "",
     }));
     setLoading(false);
   }
@@ -70,6 +69,10 @@ export default function RecurringPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!form.instrumentId) {
+      setError("Choose the account or card it's paid from.");
+      return;
+    }
     setSubmitting(true);
     const res = await fetch("/api/recurring", {
       method: "POST",
@@ -82,7 +85,7 @@ export default function RecurringPage() {
       setError(typeof body.error === "string" ? body.error : "Couldn't save that template.");
       return;
     }
-    setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setForm((f) => ({ ...f, amount: "", notes: "", instrumentId: "" }));
     load();
   }
 
@@ -176,6 +179,7 @@ export default function RecurringPage() {
           onChange={(e) => setForm({ ...form, instrumentId: e.target.value })}
           className="rounded-md border px-3 py-2 text-sm"
         >
+          <option value="">Choose account or card…</option>
           {instruments
             .filter((i) => !i.archived)
             .map((i) => (

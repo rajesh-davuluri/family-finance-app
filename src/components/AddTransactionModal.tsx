@@ -269,12 +269,11 @@ export default function AddTransactionModal({
           instrumentId: editingTransaction.instrumentId,
         });
       } else {
-        const first = insts.find((i: Instrument) => !i.archived);
+        // No account is picked for you: choosing one is part of logging it.
         setForm((f) => ({
           ...f,
           categoryId: cats[0]?.id || "",
-          instrumentId: first?.id || "",
-          currency: first?.currency || f.currency,
+          instrumentId: "",
         }));
       }
       setLoading(false);
@@ -288,6 +287,10 @@ export default function AddTransactionModal({
     const notDuplicateOf = allowDuplicate ? duplicate?.id : undefined;
     setError(null);
     setDuplicate(null);
+    if (!form.instrumentId && instruments.some((i) => !i.archived)) {
+      setError("Choose the account or card this was paid with.");
+      return;
+    }
     if (!form.categoryId || !form.instrumentId) {
       setError("Add a category and a payment instrument first (see the Categories / Instruments pages).");
       return;
@@ -577,8 +580,9 @@ export default function AddTransactionModal({
                   const inst = instruments.find((i) => i.id === e.target.value);
                   setForm({ ...form, instrumentId: e.target.value, currency: inst?.currency ?? form.currency });
                 }}
-                className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
+                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${form.instrumentId ? "" : "text-gray-500"}`}
               >
+                <option value="">Choose account or card…</option>
                 {instruments
                   .filter((i) => !i.archived || i.id === editingTransaction?.instrumentId)
                   .map((i) => (

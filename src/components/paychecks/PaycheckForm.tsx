@@ -38,7 +38,7 @@ export default function PaycheckForm({
   const start = initial ?? suggested;
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today);
-  const [instrumentId, setInstrumentId] = useState(banks[0]?.id ?? "");
+  const [instrumentId, setInstrumentId] = useState("");
   const [hours, setHours] = useState(start?.hoursPaid != null ? String(start.hoursPaid) : "");
   const [from, setFrom] = useState(start?.periodStart ?? "");
   const [to, setTo] = useState(start?.periodEnd ?? "");
@@ -90,6 +90,7 @@ export default function PaycheckForm({
           <label className="col-span-2 sm:col-span-1">
             <span className={label}>Into</span>
             <select value={instrumentId} onChange={(e) => setInstrumentId(e.target.value)} className={input}>
+              <option value="">Choose account…</option>
               {banks.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}

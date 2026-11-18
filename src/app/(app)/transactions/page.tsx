@@ -106,7 +106,6 @@ export default function TransactionsPage() {
     setForm((f) => ({
       ...f,
       categoryId: f.categoryId || cats[0]?.id || "",
-      instrumentId: f.instrumentId || insts.find((i: Instrument) => !i.archived)?.id || "",
     }));
     await loadTransactions(EMPTY_SEARCH);
     setLoading(false);
@@ -140,6 +139,10 @@ export default function TransactionsPage() {
     e.preventDefault();
     setError(null);
     setDuplicate(null);
+    if (!form.instrumentId && instruments.some((i) => !i.archived)) {
+      setError("Choose the account or card this was paid with.");
+      return;
+    }
     if (!form.categoryId || !form.instrumentId) {
       setError("Add a category and a payment instrument first (see the Categories / Instruments pages).");
       return;
@@ -294,6 +297,7 @@ export default function TransactionsPage() {
           onChange={(e) => setForm({ ...form, instrumentId: e.target.value })}
           className="rounded-md border px-3 py-2 text-sm sm:col-span-1"
         >
+          <option value="">Choose account or card…</option>
           {instruments
             .filter((i) => !i.archived)
             .map((i) => (
