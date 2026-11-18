@@ -76,7 +76,8 @@ export function attentionItems(input: {
   stale: { name: string; lastDate: string; days: number }[];
   // Bank accounts whose last check against the bank no longer holds, or was
   // made a long time ago (src/lib/balanceCheck.ts).
-  checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number }[];
+  // `card`: a credit card checked against what the card says is owed.
+  checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number; card?: boolean }[];
   // The payday planner's first dip under the cushion in the next 30 days
   // (src/lib/cashPlan.ts); when the planner ran, it replaces the rougher
   // "banks short of the card bills" check.
@@ -121,8 +122,15 @@ export function attentionItems(input: {
   }
   for (const c of input.checks ?? []) {
     const on = new Date(`${c.asOfDate}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    if (!c.matched) items.push({ key: `check:${c.name}`, level: "medium", text: `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${on}`, href: "/instruments" });
-    else if (c.daysSince >= CHECK_STALE_DAYS) items.push({ key: `check-old:${c.name}`, level: "medium", text: `${c.name} was last checked against the bank ${c.daysSince} days ago`, href: "/instruments" });
+    const href = c.card ? "/cards" : "/instruments";
+    if (!c.matched)
+      items.push({
+        key: `check:${c.name}`,
+        level: "medium",
+        text: c.card ? `${c.name} shows ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "less" : "more"} owed than the card for ${on}` : `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${on}`,
+        href,
+      });
+    else if (c.daysSince >= CHECK_STALE_DAYS) items.push({ key: `check-old:${c.name}`, level: "medium", text: `${c.name} was last checked against the ${c.card ? "card" : "bank"} ${c.daysSince} days ago`, href });
   }
   for (const s of input.stale) {
     items.push({ key: `stale:${s.name}`, level: "medium", text: `${s.name}: nothing new for ${s.days} days — import a statement?`, href: "/import" });
