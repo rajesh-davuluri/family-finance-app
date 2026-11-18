@@ -8,6 +8,7 @@ import { TRANSACTIONS_CHANGED } from "@/lib/events";
 import type { CardSnapshot, RecordedStatement } from "@/lib/cards";
 import MarkCardPaid from "@/components/MarkCardPaid";
 import CardUsage from "@/components/CardUsage";
+import BalanceCheckPanel, { CheckBadge, type LastCheck } from "@/components/BalanceCheckPanel";
 
 // Each credit card as a statement: what the last statement asked for, what's
 // been paid, what's left before the due date, and what's been charged since.
@@ -23,6 +24,8 @@ type Card = {
   creditLimit: number | null;
   statements: RecordedStatement[];
   snapshot: CardSnapshot;
+  // The last check against what the card itself says is owed, re-tested now.
+  lastCheck: LastCheck | null;
 };
 
 const short = (d: string) => formatDate(d, { month: "short", day: "numeric" });
@@ -163,7 +166,7 @@ export default function CardsPage() {
 
 function CardPanel({ card, today, onChanged }: { card: Card; today: string; onChanged: () => void }) {
   const s = card.snapshot;
-  const [open, setOpen] = useState<null | "activity" | "history" | "statement" | "settings">(null);
+  const [open, setOpen] = useState<null | "activity" | "history" | "statement" | "settings" | "check">(null);
   const [paying, setPaying] = useState(false);
   const toggle = (k: NonNullable<typeof open>) => setOpen((v) => (v === k ? null : k));
   const util = s.utilization;
@@ -245,6 +248,11 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
                 {s.creditsSinceStatement > 0 && ` − ${money(s.creditsSinceStatement, card.currency)} refunds`} +{" "}
                 {money(s.chargesSinceStatement, card.currency)} new charges
               </p>
+              {card.lastCheck && (
+                <p className="mt-1">
+                  <CheckBadge check={card.lastCheck} currency={card.currency} card />
+                </p>
+              )}
             </div>
 
             {/* The statement */}
@@ -315,6 +323,7 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
             {(
               [
                 ["activity", `Since ${short(s.statement!.close)} (${s.recent.length})`],
+                ["check", "Check against card"],
                 ["history", "Past statements"],
                 ["statement", "Add statement"],
                 ["settings", "Card settings"],
@@ -335,6 +344,9 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
               {open === "history" && <History card={card} onChanged={onChanged} />}
               {open === "statement" && <StatementForm card={card} today={today} onSaved={onChanged} />}
               {open === "settings" && <DaysForm card={card} onSaved={onChanged} />}
+              {open === "check" && (
+                <BalanceCheckPanel instrumentId={card.id} name={card.name} currency={card.currency} since={today} lastCheck={card.lastCheck} onChanged={onChanged} card />
+              )}
             </div>
           )}
           {s.duplicatePayments > 0 && (

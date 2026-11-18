@@ -10,6 +10,7 @@ import { findPairs } from "@/lib/duplicates";
 import { attentionItems } from "@/lib/attention";
 import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 import { loadCheckStatuses } from "@/lib/balanceCheckData";
+import { loadCardCheckStatuses } from "@/lib/cardCheckData";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
 
@@ -118,11 +119,17 @@ export async function GET() {
   }
 
   const banks = instruments.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived);
-  const checkStatuses = await loadCheckStatuses(banks);
-  const checks = banks.flatMap((b) => {
-    const c = checkStatuses.get(b.id);
-    return c ? [{ name: b.name, currency: b.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince }] : [];
-  });
+  const [checkStatuses, cardChecks] = await Promise.all([loadCheckStatuses(banks), loadCardCheckStatuses(householdId)]);
+  const checks = [
+    ...banks.flatMap((b) => {
+      const c = checkStatuses.get(b.id);
+      return c ? [{ name: b.name, currency: b.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince }] : [];
+    }),
+    ...cards.flatMap((k) => {
+      const c = cardChecks.get(k.id);
+      return c ? [{ name: k.name, currency: k.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince, card: true }] : [];
+    }),
+  ];
 
   const items = attentionItems({
     cards: cards.map((c) => ({ name: c.name, currency: c.currency, leftOnStatement: c.snapshot.leftOnStatement, daysToDue: c.snapshot.daysToDue })),
