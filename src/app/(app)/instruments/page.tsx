@@ -80,6 +80,8 @@ export default function InstrumentsPage() {
     notes: "",
   });
   const [transferSubmitting, setTransferSubmitting] = useState(false);
+  // A transfer being changed in the form above the list.
+  const [editingTransferId, setEditingTransferId] = useState<string | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
 
   async function load() {
@@ -101,8 +103,6 @@ export default function InstrumentsPage() {
     setTransfers(await transferRes.json());
     setTransferForm((f) => ({
       ...f,
-      fromInstrumentId: f.fromInstrumentId || insts.find((i) => !i.archived)?.id || "",
-      toInstrumentId: f.toInstrumentId || insts.filter((i) => !i.archived)[1]?.id || "",
     }));
     setLoading(false);
   }
@@ -187,13 +187,17 @@ export default function InstrumentsPage() {
   async function handleTransferSubmit(e: React.FormEvent) {
     e.preventDefault();
     setTransferError(null);
+    if (!transferForm.fromInstrumentId || !transferForm.toInstrumentId) {
+      setTransferError("Choose the account the money came from and the one it went to.");
+      return;
+    }
     if (transferForm.fromInstrumentId === transferForm.toInstrumentId) {
       setTransferError("Pick two different instruments.");
       return;
     }
     setTransferSubmitting(true);
-    const res = await fetch("/api/transfers", {
-      method: "POST",
+    const res = await fetch(editingTransferId ? `/api/transfers/${editingTransferId}` : "/api/transfers", {
+      method: editingTransferId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...transferForm, amount: parseFloat(transferForm.amount) }),
     });
@@ -203,8 +207,30 @@ export default function InstrumentsPage() {
       setTransferError(typeof body.error === "string" ? body.error : "Couldn't log that transfer.");
       return;
     }
-    setTransferForm((f) => ({ ...f, amount: "", notes: "" }));
+    // Each transfer starts from a blank choice of accounts.
+    setTransferForm((f) => ({ ...f, fromInstrumentId: "", toInstrumentId: "", amount: "", notes: "", date: editingTransferId ? getTodayLocal() : f.date }));
+    setEditingTransferId(null);
     load();
+  }
+
+  function startEditingTransfer(t: Transfer) {
+    setTransferError(null);
+    setEditingTransferId(t.id);
+    setTransferForm({
+      fromInstrumentId: t.fromInstrument.id,
+      toInstrumentId: t.toInstrument.id,
+      amount: String(Number(t.amount)),
+      currency: t.currency,
+      date: t.date.slice(0, 10),
+      notes: t.notes ?? "",
+    });
+    document.getElementById("transfer-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function cancelEditingTransfer() {
+    setEditingTransferId(null);
+    setTransferError(null);
+    setTransferForm({ fromInstrumentId: "", toInstrumentId: "", amount: "", currency: "USD", date: getTodayLocal(), notes: "" });
   }
 
   async function handleDeleteTransfer(id: string) {
@@ -471,13 +497,14 @@ export default function InstrumentsPage() {
             You need at least two active instruments to log a transfer between them.
           </p>
         ) : (
-          <form onSubmit={handleTransferSubmit} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-6">
+          <form id="transfer-form" onSubmit={handleTransferSubmit} className={`grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-6 ${editingTransferId ? "border-brand-400 ring-2 ring-brand-100" : ""}`}>
+            {editingTransferId && <p className="text-sm font-medium text-brand-700 sm:col-span-6">Editing a transfer: change what was wrong and save.</p>}
             <select
               value={transferForm.fromInstrumentId}
               onChange={(e) => setTransferForm({ ...transferForm, fromInstrumentId: e.target.value })}
               className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
             >
-              <option value="">From...</option>
+              <option value="">From… (choose)</option>
               {activeInstruments.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
@@ -489,7 +516,7 @@ export default function InstrumentsPage() {
               onChange={(e) => setTransferForm({ ...transferForm, toInstrumentId: e.target.value })}
               className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
             >
-              <option value="">To...</option>
+              <option value="">To… (choose)</option>
               {activeInstruments.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
@@ -534,10 +561,15 @@ export default function InstrumentsPage() {
             <button
               type="submit"
               disabled={transferSubmitting}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:col-span-6"
+              className={`rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 ${editingTransferId ? "sm:col-span-5" : "sm:col-span-6"}`}
             >
-              {transferSubmitting ? "Logging..." : "Log transfer"}
+              {transferSubmitting ? "Saving..." : editingTransferId ? "Save changes" : "Log transfer"}
             </button>
+            {editingTransferId && (
+              <button type="button" onClick={cancelEditingTransfer} className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+            )}
             {transferError && <p className="text-sm text-red-600 sm:col-span-6">{transferError}</p>}
           </form>
         )}
@@ -556,7 +588,7 @@ export default function InstrumentsPage() {
             </thead>
             <tbody>
               {transfers.map((t) => (
-                <tr key={t.id} className="border-b last:border-0">
+                <tr key={t.id} className={`border-b last:border-0 ${editingTransferId === t.id ? "bg-brand-50" : ""}`}>
                   <td className="p-3">{formatDate(t.date)}</td>
                   <td className="p-3">{t.fromInstrument.name}</td>
                   <td className="p-3">{t.toInstrument.name}</td>
@@ -564,7 +596,10 @@ export default function InstrumentsPage() {
                   <td className="p-3 text-right font-medium">
                     {t.currency} {Number(t.amount).toFixed(2)}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="space-x-3 whitespace-nowrap p-3 text-right">
+                    <button onClick={() => startEditingTransfer(t)} className="text-xs text-brand-600 hover:underline">
+                      Edit
+                    </button>
                     <button onClick={() => handleDeleteTransfer(t.id)} className="text-xs text-red-500 hover:underline">
                       Delete
                     </button>

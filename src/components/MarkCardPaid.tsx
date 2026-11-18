@@ -40,7 +40,6 @@ export default function MarkCardPaid({ card, onClose, onDone }: { card: Card; on
         // A bank account before cash or a wallet.
         banks.sort((a, b) => Number(b.type === "BANK_ACCOUNT") - Number(a.type === "BANK_ACCOUNT"));
         setAccounts(banks);
-        setFromId(banks[0]?.id ?? "");
       })
       .catch(() => setAccounts([]));
   }, [card.currency]);
@@ -49,7 +48,7 @@ export default function MarkCardPaid({ card, onClose, onDone }: { card: Card; on
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (!fromId) return setError("Add the bank account you pay cards from on Accounts & cards first.");
+    if (!fromId) return setError(accounts && accounts.length ? "Choose the account you paid from." : "Add the bank account you pay cards from on Accounts & cards first.");
     if (!Number.isFinite(amount) || amount <= 0) return setError("Enter the amount you paid.");
     setBusy(true);
     setError(null);
@@ -119,6 +118,7 @@ export default function MarkCardPaid({ card, onClose, onDone }: { card: Card; on
               <span className="block py-2 text-amber-700">No {card.currency} bank account</span>
             ) : (
               <select value={fromId} onChange={(e) => setFromId(e.target.value)} className="w-full rounded-md border px-3 py-2">
+                <option value="">Choose account…</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}

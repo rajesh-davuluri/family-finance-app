@@ -1034,14 +1034,13 @@ function PayDialog({
   const suggestion = suggestedCategory(policy, categories);
   const accounts = instruments.filter((i) => i.currency === policy.currency);
   const premium = policy.premiumAmount !== null ? String(policy.premiumAmount) : "";
-  const firstId = accounts[0]?.id ?? instruments[0]?.id ?? "";
-  const firstSame = instruments.find((i) => i.id === firstId)?.currency === policy.currency;
   // The premium is only pre-filled when the account is in the policy's
   // currency: paying an INR premium from a USD account is recorded as the
   // USD amount actually charged.
-  const [amount, setAmount] = useState(firstSame ? premium : "");
+  // Filled in once an account in the policy's currency is chosen.
+  const [amount, setAmount] = useState("");
   const [date, setDate] = useState(getTodayLocal());
-  const [instrumentId, setInstrumentId] = useState(firstId);
+  const [instrumentId, setInstrumentId] = useState("");
   const [categoryId, setCategoryId] = useState(suggestion.id);
   const [advance, setAdvance] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1110,6 +1109,7 @@ function PayDialog({
         </L>
         <L label="Paid from">
           <select value={instrumentId} onChange={(e) => chooseAccount(e.target.value)} className={input}>
+            <option value="">Choose account…</option>
             {accounts.map((i) => (
               <option key={i.id} value={i.id}>
                 {i.name}

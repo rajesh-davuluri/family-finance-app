@@ -195,7 +195,6 @@ export default function ImportPage() {
     const cats: Category[] = await catRes.json();
     setInstruments(insts.filter((i) => !i.archived));
     setCategories(cats);
-    setInstrumentId(insts.find((i) => !i.archived)?.id ?? "");
     setCurrency(insts.find((i) => !i.archived)?.currency ?? "USD");
     setBulkCategoryId(cats.find((c) => c.direction === "EXPENSE")?.id ?? "");
     setLoaded(true);
@@ -338,6 +337,10 @@ export default function ImportPage() {
   }
 
   async function proceedToPreview() {
+    if (!instrumentId) {
+      setError("Choose the account or card this statement is for.");
+      return;
+    }
     if (!columnMap.date || !columnMap.description || !columnMap.amount) {
       setError("Map all three columns before continuing.");
       return;
@@ -664,9 +667,15 @@ export default function ImportPage() {
               <label className="mb-1 block text-xs text-gray-500">Import into which account?</label>
               <select
                 value={instrumentId}
-                onChange={(e) => setInstrumentId(e.target.value)}
+                onChange={(e) => {
+                  // The account's own currency, unless changed below.
+                  setInstrumentId(e.target.value);
+                  const inst = instruments.find((i) => i.id === e.target.value);
+                  if (inst) setCurrency(inst.currency);
+                }}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >
+                <option value="">Choose account or card…</option>
                 {instruments.map((i) => (
                   <option key={i.id} value={i.id}>
                     {i.name}
