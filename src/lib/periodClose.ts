@@ -64,5 +64,7 @@ export function adjustmentFor(kind: AccountKind, diff: number): { direction: "IN
 }
 
 export const ADJUSTMENT_CATEGORY = { INCOME: "Balance adjustment (in)", EXPENSE: "Balance adjustment (out)" } as const;
+// Made by Monthly close, never picked by default when logging a transaction.
+export const isAdjustmentCategory = (name: string) => name === ADJUSTMENT_CATEGORY.INCOME || name === ADJUSTMENT_CATEGORY.EXPENSE;
 
 export const withinTolerance = (diffUsd: number, toleranceUsd: number) => Math.abs(diffUsd) <= toleranceUsd + 0.005;
