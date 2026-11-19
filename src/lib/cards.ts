@@ -258,6 +258,10 @@ export function cardSnapshot(input: CardInput): CardSnapshot {
 // ("PAYMENT - THANK YOU", "AUTOPAY"), otherwise a refund or cashback credit.
 export function classifyCardTransaction(direction: "INCOME" | "EXPENSE", kind: string, text: string): ActivityKind {
   if (direction === "EXPENSE") return "CHARGE";
+  // A balance adjustment from Monthly close lowers what's owed like a credit,
+  // so it counts in the statement it's dated in (payments within a cycle
+  // aren't part of an estimated statement balance).
+  if (/balance adjustment/i.test(text)) return "CREDIT";
   if (kind === "TRANSFER" || kind === "LOAN" || /\bpayment\b|thank you|autopay|\bpymt\b|e-?payment/i.test(text)) return "PAYMENT";
   return "CREDIT";
 }

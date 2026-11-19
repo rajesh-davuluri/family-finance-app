@@ -159,15 +159,19 @@ export default function BalanceCheckPanel({
           {card ? (
             <p className="mt-3 text-xs text-gray-600">
               Fix it on <a href="/transactions" className="underline">Transactions</a> (or a payment on Accounts &amp; cards → Transfers) and check again. If it
-              can&apos;t be found, type in the card&apos;s latest statement with <b>Add statement</b>: the app then works from the card&apos;s own figure.
+              can&apos;t be found, close the period on{" "}
+              <a href="/close" className="underline">
+                Monthly close
+              </a>{" "}
+              and accept the difference as a recorded adjustment, or type in the card&apos;s latest statement with <b>Add statement</b>.
             </p>
           ) : (
             <p className="mt-3 text-xs text-gray-600">
-              Fix it on <a href="/transactions" className="underline">Transactions</a> and check again. If it can&apos;t be found:{" "}
-              <button onClick={() => check(true)} disabled={busy} className="font-medium text-brand-700 underline disabled:opacity-50">
-                use the bank&apos;s figure
-              </button>
-              .
+              Fix it on <a href="/transactions" className="underline">Transactions</a> and check again. If it can&apos;t be found, close the month on{" "}
+              <a href="/close" className="underline">
+                Monthly close
+              </a>{" "}
+              and accept the difference: it&apos;s kept as a recorded adjustment.
             </p>
           )}
         </div>

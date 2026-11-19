@@ -11,6 +11,7 @@ import { attentionItems } from "@/lib/attention";
 import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 import { loadCheckStatuses } from "@/lib/balanceCheckData";
 import { loadCardCheckStatuses } from "@/lib/cardCheckData";
+import { loadCloseOverview } from "@/lib/periodCloseData";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
 
@@ -119,7 +120,8 @@ export async function GET() {
   }
 
   const banks = instruments.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived);
-  const [checkStatuses, cardChecks] = await Promise.all([loadCheckStatuses(banks), loadCardCheckStatuses(householdId)]);
+  const [checkStatuses, cardChecks, closeOverview] = await Promise.all([loadCheckStatuses(banks), loadCardCheckStatuses(householdId), loadCloseOverview(householdId, today)]);
+  const closes = closeOverview.accounts.map((a) => ({ name: a.name, currency: a.currency, status: a.status, dueLabel: a.dueLabel, closedThrough: a.latest?.periodEnd ?? null, offNow: a.latest?.offNow ?? 0 }));
   const checks = [
     ...banks.flatMap((b) => {
       const c = checkStatuses.get(b.id);
@@ -140,6 +142,7 @@ export async function GET() {
     stale,
     cashPlan: plan,
     checks,
+    closes,
   });
   return NextResponse.json({ items });
 }

@@ -12,6 +12,7 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Recurring transactions** — templates that auto-generate real transactions on a schedule (or on-demand via a "Generate now" button)
 - **Year ahead** — the big costs that don't come every month (premiums, a trip to India, school fees) turned into one amount to set aside from each paycheck, with the money set aside kept out of the planner's "safe to spend"
 - **Balance check** — type in what the bank shows for an account and see whether the app agrees; when it doesn't, the likely causes (a duplicate, a wrong-way entry, a missing statement) are listed
+- **Monthly close** — each period, check every bank account (by month) and card (by statement) against the bank or card and close it; a difference can be accepted as a recorded balance adjustment, with a tolerance and a full history
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 
 ## 1. Prerequisites
