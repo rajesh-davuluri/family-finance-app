@@ -12,6 +12,8 @@ import { countsAsSpending, kindOf } from "@/lib/categoryKind";
 import { loadCheckStatuses } from "@/lib/balanceCheckData";
 import { loadCardCheckStatuses } from "@/lib/cardCheckData";
 import { loadCloseOverview } from "@/lib/periodCloseData";
+import { loadPeople } from "@/lib/personalLoanData";
+import { REMIND_AFTER_DAYS, daysSince } from "@/lib/personalLoans";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
 
@@ -121,6 +123,10 @@ export async function GET() {
 
   const banks = instruments.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived);
   const [checkStatuses, cardChecks, closeOverview] = await Promise.all([loadCheckStatuses(banks), loadCardCheckStatuses(householdId), loadCloseOverview(householdId, today)]);
+  const people = await loadPeople(householdId);
+  const owedToYou = people
+    .filter((p) => p.balanceUsd >= 1 && p.since && daysSince(p.since, today) >= REMIND_AFTER_DAYS)
+    .map((p) => ({ name: p.name, amountUsd: p.balanceUsd, since: p.since!, days: daysSince(p.since!, today) }));
   const closes = closeOverview.accounts.map((a) => ({ name: a.name, currency: a.currency, status: a.status, dueLabel: a.dueLabel, closedThrough: a.latest?.periodEnd ?? null, offNow: a.latest?.offNow ?? 0 }));
   const checks = [
     ...banks.flatMap((b) => {
@@ -143,6 +149,7 @@ export async function GET() {
     cashPlan: plan,
     checks,
     closes,
+    owedToYou,
   });
   return NextResponse.json({ items });
 }

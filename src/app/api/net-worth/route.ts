@@ -7,6 +7,7 @@ import { debtToApproxUsd, convertToDebtCurrency } from "@/lib/debtCalculations";
 import { currentFx, holdingInputs, householdAccounts } from "@/lib/investmentData";
 import { analyze, costHeldAt, toUsd } from "@/lib/investments";
 import { loadCards } from "@/lib/cardData";
+import { loanPosition } from "@/lib/personalLoanData";
 import { calendarDateInZone } from "@/lib/appTimezone";
 
 function monthLabel(d: Date) {
@@ -50,7 +51,10 @@ export async function GET() {
   // The part of that held in other currencies (rupees in India), at the
   // approximate rate -- so the dashboard can say it's included.
   const foreignCashUsd = trackedInstruments.reduce((sum, i, idx) => sum + (i.currency === "USD" ? 0 : toApproxUsd(currentInstrumentBalances[idx], i.currency)), 0);
-  const assetsUsd = cashUsd + investmentsUsd;
+  // Money lent to friends and family is owed to you (an asset); money
+  // borrowed from them is owed by you (a liability). Current figure only.
+  const personal = await loanPosition(user.householdId);
+  const assetsUsd = cashUsd + investmentsUsd + personal.owedToYouUsd;
 
   const debtInfo = (d: (typeof debts)[number]) => ({
     currency: d.currency,
@@ -65,7 +69,7 @@ export async function GET() {
   // credit counts as nothing owed.
   const cards = await loadCards(user.householdId, calendarDateInZone());
   const cardsOwedUsd = cards.reduce((sum, c) => sum + toApproxUsd(Math.max(0, c.snapshot.outstanding ?? 0), c.currency), 0);
-  const liabilitiesUsd = loansUsd + cardsOwedUsd;
+  const liabilitiesUsd = loansUsd + cardsOwedUsd + personal.youOweUsd;
 
   // --- 6-month trend (end of each of the last 6 months, including now) ---
   const now = new Date();
@@ -104,6 +108,8 @@ export async function GET() {
     investments: Math.round(investmentsUsd * 100) / 100,
     liabilities: Math.round(liabilitiesUsd * 100) / 100,
     cardsOwed: Math.round(cardsOwedUsd * 100) / 100,
+    owedToYou: personal.owedToYouUsd,
+    youOwe: personal.youOweUsd,
     netWorth: Math.round((assetsUsd - liabilitiesUsd) * 100) / 100,
     untrackedInstrumentCount: instruments.filter((i) => i.type !== "CREDIT_CARD").length - trackedInstruments.length,
     trend,
