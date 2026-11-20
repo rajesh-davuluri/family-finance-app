@@ -250,7 +250,7 @@ function CardPanel({ card, today, onChanged }: { card: Card; today: string; onCh
               </p>
               {card.lastCheck && (
                 <p className="mt-1">
-                  <CheckBadge check={card.lastCheck} currency={card.currency} card />
+                  <CheckBadge check={card.lastCheck} currency={card.currency} card onFindWhy={() => setOpen("check")} />
                 </p>
               )}
             </div>

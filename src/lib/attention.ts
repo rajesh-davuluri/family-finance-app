@@ -1,3 +1,5 @@
+import { gapWords } from "./balanceCheck";
+
 // "Needs attention" on the dashboard: the few things worth acting on now,
 // most urgent first. Pure -- the API route gathers the inputs.
 
@@ -79,7 +81,7 @@ export function attentionItems(input: {
   // Bank accounts whose last check against the bank no longer holds, or was
   // made a long time ago (src/lib/balanceCheck.ts).
   // `card`: a credit card checked against what the card says is owed.
-  checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number; card?: boolean }[];
+  checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number; card?: boolean; likely?: string | null }[];
   // Monthly close (src/lib/periodClose.ts): accounts whose latest period
   // isn't closed yet, and closed periods that no longer match.
   closes?: { name: string; currency: string; status: string; dueLabel: string | null; closedThrough: string | null; offNow: number }[];
@@ -141,7 +143,7 @@ export function attentionItems(input: {
     off.push({
       name: c.name,
       href: c.card ? "/cards" : "/instruments",
-      text: c.card ? `${c.name} shows ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "less" : "more"} owed than the card for ${day(c.asOfDate)}` : `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${day(c.asOfDate)}`,
+      text: `${c.name}: the app shows ${gapWords(c.diff, fmt(c.diff, c.currency), c.card)} did on ${day(c.asOfDate)}${c.likely ? `. ${c.likely}` : ""}`,
     });
   }
   for (const c of (input.closes ?? []).filter((x) => x.status === "CHANGED")) {

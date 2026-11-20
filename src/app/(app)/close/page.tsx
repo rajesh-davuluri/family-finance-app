@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { money } from "@/lib/money";
+import { gapWords } from "@/lib/balanceCheck";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import type { Hint } from "@/lib/balanceCheck";
 import type { CloseAccount } from "@/lib/periodCloseData";
@@ -160,7 +161,7 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
     onChanged();
   }
 
-  const offWord = (diff: number) => (card ? `${money(Math.abs(diff), a.currency)} ${diff > 0 ? "less" : "more"} owed here than the card shows` : `${money(Math.abs(diff), a.currency)} ${diff > 0 ? "under" : "over"} the bank`);
+  const offWord = (diff: number) => gapWords(diff, money(Math.abs(diff), a.currency), card);
 
   return (
     <article className="overflow-hidden rounded-xl border bg-white shadow-sm">
@@ -189,7 +190,7 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
         )}
         {a.status === "CHANGED" && a.latest && (
           <p className="rounded-md bg-red-50 px-3 py-2 text-expense-600">
-            ⚠ Since that close, an entry on or before {day(a.latest.periodEnd)} was added, changed or deleted: the app is now {offWord(a.latest.offNow)} for that date. Find
+            ⚠ Since that close, an entry on or before {day(a.latest.periodEnd)} was added, changed or deleted: the app now shows {offWord(a.latest.offNow)} for that date. Find
             the entry, or undo the close and close again.
           </p>
         )}
@@ -249,7 +250,7 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
                   Off by {money(Math.abs(result.diff), a.currency)}: the app says {money(result.app, a.currency)}
                   {card ? " owed" : ""}, the {card ? "card" : "bank"} {money(result.figure, a.currency)}.
                 </p>
-                <p className="mt-0.5 text-xs text-gray-600">The app is {offWord(result.diff)}. Likely reasons, most telling first:</p>
+                <p className="mt-0.5 text-xs text-gray-600">The app shows {offWord(result.diff)}. Likely reasons, most telling first:</p>
                 <HintList hints={result.hints} currency={a.currency} card={card} />
                 <div className="mt-3 border-t border-red-200 pt-2.5">
                   <p className="text-xs text-gray-700">
