@@ -118,7 +118,8 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
 
   // Enough columns that every bill fits in two rows beside the bank money
   // (three once there are more than a dozen); the tiles tighten up to match.
-  const n = billCards.length;
+  const showTotal = billCards.length >= 2;
+  const n = billCards.length + (showTotal ? 1 : 0);
   const cols = n <= 4 ? 2 : n <= 12 ? Math.ceil(n / 2) : Math.ceil(n / 3);
   const dense = cols >= 4;
   const view = (c: Card) => {
@@ -143,6 +144,18 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       border: s.status === "OVERDUE" ? "border-expense-500" : urgent ? "border-amber-400" : "",
     };
   };
+
+  // Every card together, per currency (all USD for most households).
+  const totals = new Map<string, { billed: number; unbilled: number; total: number }>();
+  for (const c of billCards) {
+    const v = view(c);
+    const t = totals.get(c.currency) ?? { billed: 0, unbilled: 0, total: 0 };
+    t.billed += c.snapshot.leftOnStatement;
+    t.unbilled += v.unbilled;
+    t.total += v.total;
+    totals.set(c.currency, t);
+  }
+  const totalRows = [...totals.entries()];
 
   return (
     <section aria-label="Bank money and card bills" className={`grid gap-3 ${cardColumn ? "lg:grid-cols-3" : ""}`}>
@@ -209,6 +222,23 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
         {/* Phone: one compact card, a row per bill. */}
         {billCards.length > 0 && (
           <ul className="divide-y rounded-xl border bg-white px-3 shadow-sm sm:hidden">
+            {showTotal &&
+              totalRows.map(([cur, t]) => (
+                <li key={`total:${cur}`} className="relative -mx-3 bg-ink-50 px-3 py-2">
+                  <Link href="/cards" className="absolute inset-0 active:bg-gray-50/60" aria-label="All cards on Credit cards" />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">All cards{totalRows.length > 1 ? ` · ${cur}` : ""}</p>
+                    <p className="text-right tabular-nums">
+                      <span className="block text-[10px] uppercase tracking-wide text-gray-400">Total owed</span>
+                      <span className="font-display text-lg">{money(t.total, cur)}</span>
+                    </p>
+                  </div>
+                  <p className="mt-0.5 flex justify-between gap-3 text-xs tabular-nums text-gray-500">
+                    <span>Billed {money(t.billed, cur)}</span>
+                    <span>Unbilled {money(t.unbilled, cur)}</span>
+                  </p>
+                </li>
+              ))}
             {billCards.map((c) => {
               const v = view(c);
               return (
@@ -247,6 +277,30 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
 
         {/* Wider screens: a tile per bill, sized so they all fit beside the bank money. */}
         <div className="hidden flex-1 grid-cols-4 gap-2 sm:grid lg:grid-cols-[repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as React.CSSProperties}>
+          {showTotal &&
+            totalRows.map(([cur, t]) => (
+              <div key={`total:${cur}`} className={`relative flex min-w-0 flex-col rounded-xl border border-ink-900 bg-ink-50 shadow-sm ${dense ? "p-2.5" : "p-3"}`}>
+                <Link href="/cards" className="absolute inset-0 rounded-xl active:bg-gray-50/60" aria-label="All cards on Credit cards" />
+                <p className="truncate text-xs font-medium text-ink-900">
+                  All cards{totalRows.length > 1 ? ` · ${cur}` : ""}
+                </p>
+                <p className="mt-1 text-[10px] uppercase leading-none tracking-wide text-gray-400">Total owed</p>
+                <p className={`font-display truncate tabular-nums ${dense ? "text-lg" : "text-xl"}`}>{money(t.total, cur)}</p>
+                <p className="truncate text-xs text-gray-500">
+                  {billCards.filter((c) => c.currency === cur).length} cards
+                </p>
+                <dl className={`mt-1.5 space-y-0.5 border-t pt-1.5 tabular-nums ${dense ? "text-[11px]" : "text-xs"}`}>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Billed</dt>
+                    <dd className="truncate">{money(t.billed, cur)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gray-500">Unbilled</dt>
+                    <dd className="truncate">{money(t.unbilled, cur)}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
           {billCards.map((c) => {
             const s = c.snapshot;
             const v = view(c);
