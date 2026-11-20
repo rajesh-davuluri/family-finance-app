@@ -13,6 +13,9 @@ import { loadCheckStatuses } from "@/lib/balanceCheckData";
 import { loadCardCheckStatuses } from "@/lib/cardCheckData";
 import { loadCloseOverview } from "@/lib/periodCloseData";
 import { loadPeople } from "@/lib/personalLoanData";
+import { loadSubscriptions } from "@/lib/subscriptionData";
+import { alertText } from "@/lib/subscriptions";
+import { money } from "@/lib/money";
 import { REMIND_AFTER_DAYS, daysSince } from "@/lib/personalLoans";
 import { loadCashPlanInputs } from "@/lib/cashPlanData";
 import { DEFAULT_CUSHION_USD, cashPlan, daysBetween } from "@/lib/cashPlan";
@@ -124,6 +127,14 @@ export async function GET() {
   const banks = instruments.filter((i) => i.type === "BANK_ACCOUNT" && !i.archived);
   const [checkStatuses, cardChecks, closeOverview] = await Promise.all([loadCheckStatuses(banks), loadCardCheckStatuses(householdId), loadCloseOverview(householdId, today)]);
   const people = await loadPeople(householdId);
+  // Subscription changes worth a look: not a price drop (good news).
+  const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  // A failure here (the subscriptions table not migrated yet) mustn't take
+  // down the rest of Needs attention.
+  const subscriptionAlerts = (await loadSubscriptions(householdId, today).catch(() => []))
+    .flatMap((s) => s.alerts.filter((a) => a.kind !== "PRICE_DOWN").map((a) => ({ s, a })))
+    .sort((x, y) => ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(x.a.kind) - ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(y.a.kind))
+    .map(({ s, a }) => alertText(s, a, (n) => money(n, s.currency), short));
   const owedToYou = people
     .filter((p) => p.balanceUsd >= 1 && p.since && daysSince(p.since, today) >= REMIND_AFTER_DAYS)
     .map((p) => ({ name: p.name, amountUsd: p.balanceUsd, since: p.since!, days: daysSince(p.since!, today) }));
@@ -150,6 +161,7 @@ export async function GET() {
     checks,
     closes,
     owedToYou,
+    subscriptionAlerts,
   });
   return NextResponse.json({ items });
 }

@@ -13,6 +13,7 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Year ahead** — the big costs that don't come every month (premiums, a trip to India, school fees) turned into one amount to set aside from each paycheck, with the money set aside kept out of the planner's "safe to spend"
 - **Balance check** — type in what the bank shows for an account and see whether the app agrees; when it doesn't, the likely causes (a duplicate, a wrong-way entry, a missing statement) are listed
 - **Monthly close** — each period, check every bank account (by month) and card (by statement) against the bank or card and close it; a difference can be accepted as a recorded balance adjustment, with a tolerance and a full history
+- **Subscriptions** — every charge that repeats (streaming, apps, memberships, phone), found in your transactions: what they cost a month and a year, price rises, double charges, new ones, and anything charged after you chose to cancel
 - **Lent & borrowed** — money between you and friends or family, by person: who owes whom and since when, repayments, a friendly reminder to copy, and the balances in net worth
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 

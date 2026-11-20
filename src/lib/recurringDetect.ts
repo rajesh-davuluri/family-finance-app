@@ -206,6 +206,22 @@ function stitch(streams: Stream[]): Stream[] {
   return out;
 }
 
+// How much amounts vary, as a share of the largest. Amounts in date order
+// that step from one steady price to another (at most two changes) are
+// measured within each step.
+export function stepSpread(amounts: number[]): number {
+  const spreadOf = (xs: number[]) => (Math.max(...xs) - Math.min(...xs)) / Math.max(...xs);
+  const runs: number[][] = [];
+  for (const a of amounts) {
+    const run = runs[runs.length - 1];
+    if (run && Math.abs(a - run[run.length - 1]) <= 0.01 * Math.max(a, run[run.length - 1])) run.push(a);
+    else runs.push([a]);
+  }
+  // Steps only: each price held at least twice (bar the newest), no going back.
+  const steady = runs.length <= 3 && runs.slice(0, -1).every((r) => r.length >= 2) && new Set(runs.map((r) => Math.round(r[0] * 100))).size === runs.length;
+  return steady ? Math.max(...runs.map(spreadOf)) : spreadOf(amounts);
+}
+
 function frequencyOf(medianGap: number) {
   return FREQUENCIES.find((f) => medianGap >= f.min && medianGap <= f.max) ?? null;
 }
@@ -247,7 +263,9 @@ export function detectRecurring(history: HistoryTxn[], today: string): { bills: 
     const last = s.txns[s.txns.length - 1];
 
     const amounts = s.txns.map((t) => t.amount);
-    const spread = (Math.max(...amounts) - Math.min(...amounts)) / Math.max(...amounts);
+    // A price change (Netflix $15.49, then $17.99) isn't variation: measure
+    // the spread within each run of one price when there are at most 3 runs.
+    const spread = stepSpread(amounts);
     if (medGap < 6) {
       // The identical amount, again and again within days.
       if (s.txns.length >= 5 && spread <= 0.01 && s.key.startsWith("m:"))
