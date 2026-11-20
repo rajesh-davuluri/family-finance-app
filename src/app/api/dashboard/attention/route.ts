@@ -129,7 +129,9 @@ export async function GET() {
   const people = await loadPeople(householdId);
   // Subscription changes worth a look: not a price drop (good news).
   const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  const subscriptionAlerts = (await loadSubscriptions(householdId, today))
+  // A failure here (the subscriptions table not migrated yet) mustn't take
+  // down the rest of Needs attention.
+  const subscriptionAlerts = (await loadSubscriptions(householdId, today).catch(() => []))
     .flatMap((s) => s.alerts.filter((a) => a.kind !== "PRICE_DOWN").map((a) => ({ s, a })))
     .sort((x, y) => ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(x.a.kind) - ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(y.a.kind))
     .map(({ s, a }) => alertText(s, a, (n) => money(n, s.currency), short));
