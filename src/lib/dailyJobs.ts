@@ -6,6 +6,8 @@ import { loadCards } from "@/lib/cardData";
 import { cardReminder } from "@/lib/cards";
 import { budgetAlert } from "@/lib/budgets";
 import { toApproxUsd } from "@/lib/fx";
+import { kindOf } from "@/lib/categoryKind";
+import { summariesDue, summaryText } from "@/lib/moneySummary";
 
 // The daily jobs. vercel.json runs them all in one call (/api/cron/daily) so
 // the serverless database wakes once a day, not once per job: each wake keeps
@@ -188,4 +190,33 @@ async function remindBudgets(today: string) {
     }
   }
   return sent;
+}
+
+// The money summary on Telegram: Sundays for the week before, the 1st for
+// the month before, to every linked chat of each household that has it on.
+// Runs inside the one daily call, so it never wakes the database on its own.
+export async function sendSummaries(today = calendarDateInZone()) {
+  const periods = summariesDue(today);
+  if (!periods.length || !telegramConfigured()) return { sent: 0 };
+  const households = await prisma.household.findMany({
+    where: { moneySummary: true, telegramLinks: { some: {} } },
+    select: { id: true, telegramLinks: { select: { chatId: true } } },
+  });
+  let sent = 0;
+  for (const h of households) {
+    for (const p of periods) {
+      const rows = await prisma.transaction.findMany({
+        where: { householdId: h.id, date: { gte: new Date(`${p.from}T00:00:00Z`), lte: new Date(`${p.to}T00:00:00Z`) } },
+        select: { amount: true, currency: true, category: { select: { name: true, direction: true, kind: true } } },
+      });
+      const text = summaryText(
+        p,
+        rows.map((t) => ({ usd: toApproxUsd(Number(t.amount), t.currency), kind: kindOf(t.category), categoryName: t.category.name })),
+      );
+      if (!text) continue;
+      for (const c of h.telegramLinks) await sendMessage(c.chatId, text);
+      sent++;
+    }
+  }
+  return { sent };
 }

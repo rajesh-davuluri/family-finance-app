@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 type NotificationItem = { id: string; message: string; read: boolean; createdAt: string };
 
+const POLL_MS = 5 * 60_000;
+
 export default function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -20,12 +22,27 @@ export default function NotificationBell() {
   }
 
   useEffect(() => {
-    load();
-    // Poll every 60s so the badge updates if the other person adds
-    // something while you're already on the page, without needing a
-    // websocket/push setup for a two-person household.
-    const interval = setInterval(load, 60000);
-    return () => clearInterval(interval);
+    // Check while the app is on screen: every 5 minutes, and once on coming
+    // back to it. A tab in the background, or the app left open on a phone,
+    // asks nothing -- every request wakes the serverless database and keeps
+    // it from pausing (and billing).
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (interval) return;
+      load();
+      interval = setInterval(load, POLL_MS);
+    };
+    const stop = () => {
+      if (interval) clearInterval(interval);
+      interval = null;
+    };
+    const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   useEffect(() => {
