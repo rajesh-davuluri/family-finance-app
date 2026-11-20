@@ -9,7 +9,7 @@ export type AttentionItem = { key: string; level: "high" | "medium"; rank: numbe
 
 // Money about to go short first, then bills, then the books being wrong,
 // then habits and housekeeping.
-export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
+export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, subscriptions: 5.5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
 // How many lines the dashboard shows before "Show more".
 export const ATTENTION_SHOWN = 4;
 
@@ -85,6 +85,9 @@ export function attentionItems(input: {
   // Monthly close (src/lib/periodClose.ts): accounts whose latest period
   // isn't closed yet, and closed periods that no longer match.
   closes?: { name: string; currency: string; status: string; dueLabel: string | null; closedThrough: string | null; offNow: number }[];
+  // Subscriptions (src/lib/subscriptions.ts): price rises, double charges,
+  // new ones and charges after a Cancel, most pressing first.
+  subscriptionAlerts?: string[];
   // Lent & borrowed: people who have owed you a while (src/lib/personalLoans.ts).
   owedToYou?: { name: string; amountUsd: number; since: string; days: number }[];
   // The payday planner's first dip under the cushion in the next 30 days
@@ -176,6 +179,12 @@ export function attentionItems(input: {
   if (cats.length) {
     const rest = cats.length - 1;
     items.push({ ...cats[0], key: "categories", text: `${cats[0].text}${rest ? ` · ${rest} more ${rest === 1 ? "category" : "categories"} running high` : ""}` });
+  }
+
+  const subs = input.subscriptionAlerts ?? [];
+  if (subs.length) {
+    const rest = subs.length - 1;
+    items.push({ key: "subscriptions", level: "medium", rank: RANK.subscriptions, text: `${subs[0]}${rest ? ` · ${rest} more subscription change${rest === 1 ? "" : "s"}` : ""}`, href: "/subscriptions" });
   }
 
   const owing = [...(input.owedToYou ?? [])].sort((a, b) => b.days - a.days);

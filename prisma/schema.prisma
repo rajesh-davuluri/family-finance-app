@@ -66,6 +66,7 @@ model Household {
   investmentAccounts InvestmentAccount[]
   plannedExpenses    PlannedExpense[]
   loanContacts       LoanContact[]
+  subscriptionMarks  SubscriptionMark[]
 }
 
 model User {
@@ -806,4 +807,21 @@ model LoanContact {
   createdAt DateTime @default(now())
 
   @@unique([householdId, name])
+}
+
+// Subscriptions (src/lib/subscriptions.ts): what the household decided about
+// each one found in its transactions. `key` is the merchant ("m:NETFLIX").
+// KEEP clears its price-change alert as of `markedAt`; CANCEL flags any
+// charge that arrives after `markedAt`.
+model SubscriptionMark {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  key      String   @db.NVarChar(200)
+  status   String   @db.NVarChar(20) // KEEP | CANCEL
+  amount   Decimal? @db.Decimal(12, 2) // the charge when marked
+  markedAt DateTime @default(now())
+
+  @@unique([householdId, key])
 }
