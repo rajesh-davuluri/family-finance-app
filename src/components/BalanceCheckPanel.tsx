@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { money } from "@/lib/money";
+import { gapWords } from "@/lib/balanceCheck";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import type { Hint } from "@/lib/balanceCheck";
 
@@ -17,15 +18,21 @@ const day = (d: string) => formatDate(d, { month: "short", day: "numeric", year:
 
 // One line on where an account (or, with `card`, a credit card) stands
 // against the bank's or the card's own figure.
-export function CheckBadge({ check, currency, card = false }: { check: LastCheck | null; currency: string; card?: boolean }) {
+// `onFindWhy` opens the check panel, which lists the likely causes.
+export function CheckBadge({ check, currency, card = false, onFindWhy }: { check: LastCheck | null; currency: string; card?: boolean; onFindWhy?: () => void }) {
   if (!check) return null;
   if (!check.matched) {
     return (
       <span className="text-xs font-medium text-expense-600">
-        ⚠{" "}
-        {card
-          ? `${money(Math.abs(check.diff), currency)} ${check.diff > 0 ? "less" : "more"} owed here than the card shows for ${day(check.asOfDate)}`
-          : `${money(Math.abs(check.diff), currency)} ${check.diff > 0 ? "under" : "over"} the bank for ${day(check.asOfDate)}`}
+        ⚠ The app shows {gapWords(check.diff, money(Math.abs(check.diff), currency), card)} did on {day(check.asOfDate)}
+        {onFindWhy && (
+          <>
+            {" · "}
+            <button type="button" onClick={onFindWhy} className="text-brand-600 underline-offset-2 hover:underline">
+              find why
+            </button>
+          </>
+        )}
       </span>
     );
   }
@@ -128,7 +135,7 @@ export default function BalanceCheckPanel({
             {card ? " owed" : ""}, the {card ? "card" : "bank"} {money(result.bankBalance, currency)}.
           </p>
           <p className="mt-0.5 text-xs text-gray-600">
-            {card ? `The app shows ${result.diff > 0 ? "less" : "more"} owed than the card.` : `The app is ${result.diff > 0 ? "short" : "over"}.`} Likely reasons, most telling first:
+            The app shows {gapWords(result.diff, money(Math.abs(result.diff), currency), card)}. Likely reasons, most telling first:
           </p>
           <ol className="mt-2 space-y-2 text-xs text-gray-700">
             {result.hints.map((h, k) => (

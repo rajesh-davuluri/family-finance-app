@@ -101,3 +101,10 @@ export function findCauses(input: { diff: number; items: CheckItem[]; since: str
   });
   return hints;
 }
+
+// How a gap reads everywhere it's shown: "$50.00 less than your bank" or
+// "$50.00 more owed than your card". `diff` is the bank's (or card's) figure
+// less the app's, as stored on a check; `amount` is it already formatted.
+export function gapWords(diff: number, amount: string, card = false): string {
+  return `${amount} ${diff > 0 ? "less" : "more"}${card ? " owed" : ""} than your ${card ? "card" : "bank"}`;
+}

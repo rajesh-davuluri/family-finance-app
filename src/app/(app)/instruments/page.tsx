@@ -400,7 +400,7 @@ export default function InstrumentsPage() {
                   )}
                   {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.lastCheck && (
                     <span className="mt-0.5 block">
-                      <CheckBadge check={i.lastCheck} currency={i.currency} />
+                      <CheckBadge check={i.lastCheck} currency={i.currency} onFindWhy={() => setCheckId(i.id)} />
                     </span>
                   )}
                   {i.type === "CREDIT_CARD" || editingBalanceId === i.id || i.currentBalance !== null ? null : (
