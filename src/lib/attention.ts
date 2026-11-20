@@ -1,7 +1,15 @@
 // "Needs attention" on the dashboard: the few things worth acting on now,
 // most urgent first. Pure -- the API route gathers the inputs.
 
-export type AttentionItem = { key: string; level: "high" | "medium"; text: string; href: string };
+// `rank`: how much the line matters among lines of the same level (lower
+// first). The dashboard shows the first few; the rest sit behind "more".
+export type AttentionItem = { key: string; level: "high" | "medium"; rank: number; text: string; href: string };
+
+// Money about to go short first, then bills, then the books being wrong,
+// then habits and housekeeping.
+export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
+// How many lines the dashboard shows before "Show more".
+export const ATTENTION_SHOWN = 4;
 
 const fmt = (n: number, currency = "USD") =>
   `${currency === "INR" ? "₹" : currency === "USD" ? "$" : `${currency} `}${Math.abs(n).toLocaleString(currency === "INR" ? "en-IN" : "en-US", {
@@ -16,8 +24,6 @@ export const OVER_MIN_SHARE = 0.05;
 // Last month and the average only count as marks from this size up, so a
 // category that's usually near nothing doesn't trip on its first purchase.
 export const BASELINE_MIN_USD = 25;
-// The most categories listed one by one; the rest are summed up in a line.
-export const MAX_CATEGORY_ITEMS = 4;
 
 export type CategoryMonth = {
   name: string;
@@ -47,17 +53,13 @@ export function categoryItems(categories: CategoryMonth[]): AttentionItem[] {
     .sort((a, b) => Number(b.budget) - Number(a.budget) || b.by - a.by);
 
   const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
-  const items: AttentionItem[] = over.slice(0, MAX_CATEGORY_ITEMS).map(({ c, marks, budget }) => ({
+  return over.map(({ c, marks, budget }) => ({
     key: `category:${c.name}`,
     level: "medium",
+    rank: RANK.categories,
     text: `${c.name}: ${whole(c.spent)} this month, past ${list(marks.map((m) => m.text))}`,
     href: budget ? "/budgets" : "/reports",
   }));
-  const rest = over.slice(MAX_CATEGORY_ITEMS);
-  if (rest.length) {
-    items.push({ key: "category:more", level: "medium", text: `${rest.length} more ${rest.length === 1 ? "category is" : "categories are"} past last month or the usual: ${list(rest.map((x) => x.c.name))}`, href: "/reports" });
-  }
-  return items;
 }
 // A balance check older than this is worth repeating (a statement cycle and
 // a bit).
@@ -88,78 +90,132 @@ export function attentionItems(input: {
   // "banks short of the card bills" check.
   cashPlan?: { ran: boolean; tight: { start: string; lowest: number; lowestDate: string; under: number; cause: string | null; actBy: string; actByDays: number; daysAway: number } | null };
 }): AttentionItem[] {
+  // One line per kind of problem: several cards due, several accounts off or
+  // several categories running high each read as one line, so a busy month
+  // doesn't push the bill due tomorrow out of sight.
   const items: AttentionItem[] = [];
+  const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const names = (xs: string[], max = 3) => {
+    const shown = xs.slice(0, max);
+    const more = xs.length - shown.length;
+    if (more > 0) return `${shown.join(", ")} and ${more} more`;
+    return shown.length <= 1 ? shown.join("") : `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;
+  };
+
   const t = input.cashPlan?.tight;
   if (t) {
-    const when = (d: string, days: number) => (days <= 0 ? "today" : days === 1 ? "tomorrow" : `on ${new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`);
+    const when = (d: string, days: number) => (days <= 0 ? "today" : days === 1 ? "tomorrow" : `on ${day(d)}`);
     items.push({
       key: "cash-tight",
       level: t.daysAway <= 7 ? "high" : "medium",
+      rank: RANK.cash,
       text: `Cash may drop to ${t.lowest < 0 ? "−" : ""}${fmt(t.lowest)} ${when(t.lowestDate, t.daysAway)}${t.cause ? ` after the ${t.cause}` : ""}, ${fmt(t.under)} under your cushion. Act ${t.actByDays <= 0 ? "today" : `by ${when(t.actBy, t.actByDays).replace(/^on /, "")}`}`,
       href: "/plan",
     });
   }
-  for (const c of input.cards) {
-    if (c.leftOnStatement <= 0.005 || c.daysToDue == null || c.daysToDue > 5) continue;
-    items.push({
-      key: `card:${c.name}`,
-      level: c.daysToDue <= 1 ? "high" : "medium",
-      text: `${c.name}: ${fmt(c.leftOnStatement, c.currency)} ${dueWords(c.daysToDue)}`,
-      href: "/cards",
-    });
-  }
   if (!input.cashPlan?.ran && input.bankUsd != null && input.cardBillsUsd > 0.005 && input.bankUsd < input.cardBillsUsd) {
+    items.push({ key: "short", level: "high", rank: RANK.cash, text: `Banks are ${fmt(input.cardBillsUsd - input.bankUsd)} short of the card bills due in the next 2 weeks`, href: "/cards" });
+  }
+
+  // Card bills due within 5 days, soonest first, in one line.
+  const due = input.cards
+    .filter((c) => c.leftOnStatement > 0.005 && c.daysToDue != null && c.daysToDue <= 5)
+    .sort((a, b) => a.daysToDue! - b.daysToDue!);
+  if (due.length) {
+    const one = (c: (typeof due)[number]) => `${c.name}: ${fmt(c.leftOnStatement, c.currency)} ${dueWords(c.daysToDue!)}`;
+    const usd = due.every((c) => c.currency === "USD");
+    const total = due.reduce((s, c) => s + c.leftOnStatement, 0);
     items.push({
-      key: "short",
-      level: "high",
-      text: `Banks are ${fmt(input.cardBillsUsd - input.bankUsd)} short of the card bills due in the next 2 weeks`,
+      key: "cards",
+      level: due[0].daysToDue! <= 1 ? "high" : "medium",
+      rank: RANK.cards,
+      text: due.length === 1 ? one(due[0]) : `${due.length} card bills due: ${one(due[0])}, ${names(due.slice(1).map((c) => `${c.name} ${dueWords(c.daysToDue!)}`), 2)}${usd ? ` · ${fmt(total)} in all` : ""}`,
       href: "/cards",
     });
   }
-  items.push(...categoryItems(input.categories));
-  if (input.likelyDuplicates > 0) {
-    items.push({
-      key: "dups",
-      level: "medium",
-      text: `${input.likelyDuplicates} likely duplicate transaction${input.likelyDuplicates === 1 ? "" : "s"} to review`,
-      href: "/transactions",
-    });
-  }
+
+  // Accounts that don't match the bank or card, or changed after a close.
+  const off: { name: string; text: string; href: string }[] = [];
   for (const c of input.checks ?? []) {
-    const on = new Date(`${c.asOfDate}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    const href = c.card ? "/cards" : "/instruments";
-    if (!c.matched)
-      items.push({
-        key: `check:${c.name}`,
-        level: "medium",
-        text: c.card ? `${c.name} shows ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "less" : "more"} owed than the card for ${on}` : `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${on}`,
-        href,
-      });
-    else if (c.daysSince >= CHECK_STALE_DAYS) items.push({ key: `check-old:${c.name}`, level: "medium", text: `${c.name} was last checked against the ${c.card ? "card" : "bank"} ${c.daysSince} days ago`, href });
-  }
-  const toClose = (input.closes ?? []).filter((c) => c.status === "DUE");
-  if (toClose.length === 1) {
-    items.push({ key: "close:due", level: "medium", text: `${toClose[0].name}: ${toClose[0].dueLabel ?? "the latest period"} isn't closed yet`, href: "/close" });
-  } else if (toClose.length > 1) {
-    const names = toClose.map((c) => c.name);
-    items.push({ key: "close:due", level: "medium", text: `${toClose.length} accounts to close for the period: ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`, href: "/close" });
+    if (c.matched) continue;
+    off.push({
+      name: c.name,
+      href: c.card ? "/cards" : "/instruments",
+      text: c.card ? `${c.name} shows ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "less" : "more"} owed than the card for ${day(c.asOfDate)}` : `${c.name} is ${fmt(c.diff, c.currency)} ${c.diff > 0 ? "under" : "over"} the bank's balance for ${day(c.asOfDate)}`,
+    });
   }
   for (const c of (input.closes ?? []).filter((x) => x.status === "CHANGED")) {
-    const on = c.closedThrough ? new Date(`${c.closedThrough}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "its last close";
-    items.push({ key: `close:changed:${c.name}`, level: "medium", text: `${c.name} changed after it was closed through ${on}: now ${fmt(c.offNow, c.currency)} off`, href: "/close" });
+    if (off.some((o) => o.name === c.name)) continue;
+    off.push({ name: c.name, href: "/close", text: `${c.name} changed after it was closed through ${c.closedThrough ? day(c.closedThrough) : "its last close"}: now ${fmt(c.offNow, c.currency)} off` });
   }
-  const owing = (input.owedToYou ?? []).sort((a, b) => b.days - a.days);
-  for (const o of owing.slice(0, 2)) {
-    const on = new Date(`${o.since}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    items.push({ key: `owed:${o.name}`, level: "medium", text: `${o.name} has owed you ${fmt(o.amountUsd)} since ${on} (${o.days} days)`, href: "/lent" });
+  if (off.length) {
+    items.push({
+      key: "accounts-off",
+      level: "medium",
+      rank: RANK.accountsOff,
+      text: off.length === 1 ? off[0].text : `${off.length} accounts don't match their statements: ${names(off.map((o) => o.name))}`,
+      href: off.every((o) => o.href === off[0].href) ? off[0].href : "/close",
+    });
   }
-  if (owing.length > 2) {
-    const rest = owing.slice(2);
-    items.push({ key: "owed:more", level: "medium", text: `${rest.length} more ${rest.length === 1 ? "person has" : "people have"} owed you over a month: ${rest.map((o) => o.name).join(", ")}`, href: "/lent" });
+
+  const toClose = (input.closes ?? []).filter((c) => c.status === "DUE");
+  if (toClose.length) {
+    items.push({
+      key: "close:due",
+      level: "medium",
+      rank: RANK.toClose,
+      text: toClose.length === 1 ? `${toClose[0].name}: ${toClose[0].dueLabel ?? "the latest period"} isn't closed yet` : `${toClose.length} accounts to close for the period: ${names(toClose.map((c) => c.name))}`,
+      href: "/close",
+    });
   }
-  for (const s of input.stale) {
-    items.push({ key: `stale:${s.name}`, level: "medium", text: `${s.name}: nothing new for ${s.days} days — import a statement?`, href: "/import" });
+
+  // Categories: the one furthest over in full, the others counted.
+  const cats = categoryItems(input.categories);
+  if (cats.length) {
+    const rest = cats.length - 1;
+    items.push({ ...cats[0], key: "categories", text: `${cats[0].text}${rest ? ` · ${rest} more ${rest === 1 ? "category" : "categories"} running high` : ""}` });
   }
+
+  const owing = [...(input.owedToYou ?? [])].sort((a, b) => b.days - a.days);
+  if (owing.length) {
+    const o = owing[0];
+    const rest = owing.length - 1;
+    items.push({
+      key: "owed",
+      level: "medium",
+      rank: RANK.owed,
+      text: `${o.name} has owed you ${fmt(o.amountUsd)} since ${day(o.since)} (${o.days} days)${rest ? ` · ${rest} more ${rest === 1 ? "person owes" : "people owe"} you over a month` : ""}`,
+      href: "/lent",
+    });
+  }
+
+  if (input.likelyDuplicates > 0) {
+    items.push({ key: "dups", level: "medium", rank: RANK.duplicates, text: `${input.likelyDuplicates} likely duplicate transaction${input.likelyDuplicates === 1 ? "" : "s"} to review`, href: "/transactions" });
+  }
+
+  const stale = [...input.stale].sort((a, b) => b.days - a.days);
+  if (stale.length) {
+    items.push({
+      key: "stale",
+      level: "medium",
+      rank: RANK.stale,
+      text: stale.length === 1 ? `${stale[0].name}: nothing new for ${stale[0].days} days — import a statement?` : `${stale.length} accounts have nothing new for a while: ${names(stale.map((s) => `${s.name} (${s.days} days)`), 2)} — import statements?`,
+      href: "/import",
+    });
+  }
+
+  const checkAgain = (input.checks ?? []).filter((c) => c.matched && c.daysSince >= CHECK_STALE_DAYS).sort((a, b) => b.daysSince - a.daysSince);
+  if (checkAgain.length) {
+    const c = checkAgain[0];
+    items.push({
+      key: "check-again",
+      level: "medium",
+      rank: RANK.checkAgain,
+      text: checkAgain.length === 1 ? `${c.name} was last checked against the ${c.card ? "card" : "bank"} ${c.daysSince} days ago` : `${checkAgain.length} accounts not checked against their statements in ${CHECK_STALE_DAYS}+ days: ${names(checkAgain.map((x) => x.name))}`,
+      href: checkAgain.every((x) => x.card) ? "/cards" : checkAgain.every((x) => !x.card) ? "/instruments" : "/close",
+    });
+  }
+
   const order = { high: 0, medium: 1 };
-  return items.sort((a, b) => order[a.level] - order[b.level]);
+  return items.sort((a, b) => order[a.level] - order[b.level] || a.rank - b.rank);
 }
