@@ -11,7 +11,7 @@ import type { Hint } from "@/lib/balanceCheck";
 // When it doesn't, the likely reasons are listed; fix one and check again,
 // or take the bank's figure as the new starting point.
 
-export type LastCheck = { asOfDate: string; checkedAt: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; daysSince: number };
+export type LastCheck = { asOfDate: string; checkedAt: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; daysSince: number; likely?: string | null };
 type Result = { asOfDate: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; hints: Hint[] };
 
 const day = (d: string) => formatDate(d, { month: "short", day: "numeric", year: "numeric" });
@@ -25,6 +25,7 @@ export function CheckBadge({ check, currency, card = false, onFindWhy }: { check
     return (
       <span className="text-xs font-medium text-expense-600">
         ⚠ The app shows {gapWords(check.diff, money(Math.abs(check.diff), currency), card)} did on {day(check.asOfDate)}
+        {check.likely && <span className="block font-normal text-gray-600">{check.likely}</span>}
         {onFindWhy && (
           <>
             {" · "}

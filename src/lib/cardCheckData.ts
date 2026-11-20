@@ -2,8 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { kindOf } from "@/lib/categoryKind";
 import { loadCards } from "@/lib/cardData";
 import { addDays, classifyCardTransaction, dedupePayments, type CardActivity } from "@/lib/cards";
-import { isMatch, type CheckItem } from "@/lib/balanceCheck";
-import type { CheckStatus } from "@/lib/balanceCheckData";
+import { explainGap, isMatch, type CheckItem } from "@/lib/balanceCheck";
+import { money } from "@/lib/money";
+import { addedAfter, type CheckStatus } from "@/lib/balanceCheckData";
 
 // Checking a credit card against the card's own balance: what the app works
 // out as owed on a date (the same figure as "Owed now" on Credit cards), the
@@ -60,6 +61,7 @@ export async function loadCardCheckStatuses(householdId: string): Promise<Map<st
   const out = new Map<string, CheckStatus>();
   const checks = await prisma.balanceCheck.findMany({
     where: { instrument: { householdId, type: "CREDIT_CARD", archived: false } },
+    include: { instrument: { select: { currency: true } } },
     orderBy: { createdAt: "desc" },
   });
   const latest = new Map<string, (typeof checks)[number]>();
@@ -77,15 +79,33 @@ export async function loadCardCheckStatuses(householdId: string): Promise<Map<st
     const app = owedByDate.get(d)?.get(id);
     if (app == null) continue;
     const bank = Number(c.bankBalance);
+    const diff = Math.round((bank - app) * 100) / 100;
+    let likely: string | null = null;
+    if (!isMatch(bank, app)) {
+      const since = cardCheckSince(d);
+      const items = await cardCheckItems(id, c.instrument.currency, since, d);
+      likely = explainGap({
+        diff,
+        checkedDiff: Math.round((bank - Number(c.appBalance)) * 100) / 100,
+        checkedOn: c.createdAt.toISOString().slice(0, 10),
+        asOf: d,
+        since,
+        items,
+        addedSince: await addedAfter(id, new Date(`${since}T00:00:00Z`), c.asOfDate, c.createdAt, items),
+        card: true,
+        money: (n) => money(n, c.instrument.currency),
+      });
+    }
     out.set(id, {
       asOfDate: d,
       checkedAt: c.createdAt.toISOString(),
       bankBalance: bank,
       appBalance: app,
-      diff: Math.round((bank - app) * 100) / 100,
+      diff,
       matched: isMatch(bank, app),
       adjusted: false,
       daysSince: Math.floor((Date.now() - c.createdAt.getTime()) / 86_400_000),
+      likely,
     });
   }
   return out;

@@ -131,11 +131,11 @@ export async function GET() {
   const checks = [
     ...banks.flatMap((b) => {
       const c = checkStatuses.get(b.id);
-      return c ? [{ name: b.name, currency: b.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince }] : [];
+      return c ? [{ name: b.name, currency: b.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince, likely: c.likely }] : [];
     }),
     ...cards.flatMap((k) => {
       const c = cardChecks.get(k.id);
-      return c ? [{ name: k.name, currency: k.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince, card: true }] : [];
+      return c ? [{ name: k.name, currency: k.currency, asOfDate: c.asOfDate, diff: c.diff, matched: c.matched, daysSince: c.daysSince, card: true, likely: c.likely }] : [];
     }),
   ];
 
