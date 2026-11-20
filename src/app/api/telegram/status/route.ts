@@ -16,7 +16,8 @@ export async function GET() {
     telegramApi<{ username: string }>("getMe", {}),
     telegramApi<{ url: string; last_error_message?: string }>("getWebhookInfo", {}),
     prisma.telegramLink.count({ where: { userId: user.id } }),
-    prisma.household.findUnique({ where: { id: user.householdId }, select: { moneySummary: true } }),
+    // Tolerates the column not being migrated yet: the rest still loads.
+    prisma.household.findUnique({ where: { id: user.householdId }, select: { moneySummary: true } }).catch(() => null),
   ]);
 
   return NextResponse.json({
