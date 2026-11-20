@@ -12,10 +12,11 @@ export async function GET() {
 
   if (!telegramConfigured()) return NextResponse.json({ configured: false });
 
-  const [me, webhook, linkedChats] = await Promise.all([
+  const [me, webhook, linkedChats, household] = await Promise.all([
     telegramApi<{ username: string }>("getMe", {}),
     telegramApi<{ url: string; last_error_message?: string }>("getWebhookInfo", {}),
     prisma.telegramLink.count({ where: { userId: user.id } }),
+    prisma.household.findUnique({ where: { id: user.householdId }, select: { moneySummary: true } }),
   ]);
 
   return NextResponse.json({
@@ -27,5 +28,6 @@ export async function GET() {
     lastError: webhook?.last_error_message ?? null,
     linkCode: linkCode(user.id),
     linkedChats,
+    moneySummary: household?.moneySummary ?? true,
   });
 }

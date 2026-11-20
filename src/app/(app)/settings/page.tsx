@@ -14,6 +14,7 @@ type TelegramStatus =
       lastError: string | null;
       linkCode: string | null;
       linkedChats: number;
+      moneySummary: boolean;
     };
 
 export default function SettingsPage() {
@@ -44,6 +45,14 @@ export default function SettingsPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then(setTelegram)
       .catch(() => setTelegram(null));
+  }
+
+  async function setMoneySummary(on: boolean) {
+    setTelegramBusy(true);
+    const res = await fetch("/api/telegram/summary", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }) });
+    setTelegramBusy(false);
+    if (!res.ok) return setTelegramMessage("Couldn't save the summary setting.");
+    setTelegram((t) => (t && t.configured ? { ...t, moneySummary: on } : t));
   }
 
   async function connectTelegram() {
@@ -188,6 +197,24 @@ export default function SettingsPage() {
                   links from their own Settings page.
                 </p>
               </div>
+            )}
+            {telegram.connected && (
+              <label className="flex items-start gap-2 border-t pt-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={telegram.moneySummary}
+                  disabled={telegramBusy}
+                  onChange={(e) => setMoneySummary(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-gray-700">Money summary</span>
+                  <span className="block text-xs text-gray-500">
+                    Every Sunday morning, last week&apos;s income and expenses by category; on the 1st, the same for the month. Sent to every
+                    linked Telegram in the household. It goes out with the daily reminders, so it doesn&apos;t wake the database on its own.
+                  </span>
+                </span>
+              </label>
             )}
             {telegramMessage && <p className="text-xs text-gray-500">{telegramMessage}</p>}
           </div>

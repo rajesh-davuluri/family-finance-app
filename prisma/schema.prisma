@@ -48,6 +48,10 @@ model Household {
   // as a recorded balance adjustment without explaining it. Null = $10.
   closeToleranceUsd Decimal? @db.Decimal(12, 2)
 
+  // The money summary on Telegram (src/lib/moneySummary.ts): Sundays for
+  // the week, the 1st for the month.
+  moneySummary Boolean @default(true)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
