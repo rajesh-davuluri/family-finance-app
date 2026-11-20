@@ -19,11 +19,11 @@ const primaryLinks = [
   { href: "/budgets", label: "Budgets" },
   { href: "/debts", label: "Debts" },
   { href: "/recurring", label: "Recurring" },
-  { href: "/goals", label: "Goals" },
-  { href: "/net-worth", label: "Net Worth" },
 ];
 
 const moreLinks = [
+  { href: "/goals", label: "Goals" },
+  { href: "/net-worth", label: "Net Worth" },
   { href: "/year-ahead", label: "Year ahead" },
   { href: "/close", label: "Monthly close" },
   { href: "/lent", label: "Lent & borrowed" },
