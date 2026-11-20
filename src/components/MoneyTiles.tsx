@@ -85,8 +85,14 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
     return <div className="h-28 animate-pulse rounded-xl bg-white/60" aria-hidden />;
   }
 
-  const billCards = [...cards].filter((c) => c.snapshot.hasCycle).sort((a, b) => rank(a) - rank(b) || (a.snapshot.daysToDue ?? 0) - (b.snapshot.daysToDue ?? 0));
-  const notSetUp = cards.length - billCards.length;
+  // Only cards with something owed get a tile; a card at $0 has nothing to
+  // act on, so it stays on the Credit cards page.
+  const setUp = cards.filter((c) => c.snapshot.hasCycle);
+  const owes = (c: Card) => (c.snapshot.outstanding ?? c.snapshot.leftOnStatement) > 0.005;
+  const billCards = setUp.filter(owes).sort((a, b) => rank(a) - rank(b) || (a.snapshot.daysToDue ?? 0) - (b.snapshot.daysToDue ?? 0));
+  const notSetUp = cards.length - setUp.length;
+  // Nothing beside the bank money: let it take the whole row.
+  const cardColumn = billCards.length > 0 || (cards.length > 0 && setUp.length === 0);
 
   // Bank money by currency, and what's left once the card bills are paid.
   const inBank = new Map<string, number>();
@@ -139,7 +145,7 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
   };
 
   return (
-    <section aria-label="Bank money and card bills" className="grid gap-3 lg:grid-cols-3">
+    <section aria-label="Bank money and card bills" className={`grid gap-3 ${cardColumn ? "lg:grid-cols-3" : ""}`}>
       {/* Money in the bank */}
       <div className="rounded-xl bg-ink-900 p-4 text-white shadow-sm">
         <Link href="/instruments" className="text-xs uppercase tracking-wide text-ink-300 underline-offset-2 hover:underline">
@@ -197,6 +203,7 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       </div>
 
       {/* Every card bill at once, beside the bank money. */}
+      {cardColumn && (
       <div className="flex flex-col lg:col-span-2">
         {billCards.length > 0 && <p className="mb-1.5 px-1 text-xs uppercase tracking-wide text-gray-500">Card bills · billed, unbilled and total owed</p>}
         {/* Phone: one compact card, a row per bill. */}
@@ -310,6 +317,7 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
           </Link>
         )}
       </div>
+      )}
       {paying && (
         <MarkCardPaid
           card={paying}
