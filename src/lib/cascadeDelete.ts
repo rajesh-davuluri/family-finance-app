@@ -17,6 +17,7 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.savingsGoal.deleteMany({ where: { householdId } }),
     prisma.notification.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
+    prisma.loanContact.deleteMany({ where: { householdId } }),
     prisma.investmentTrade.deleteMany({ where: { holding: { account: { householdId } } } }),
     prisma.holding.deleteMany({ where: { account: { householdId } } }),
     prisma.investmentAccount.deleteMany({ where: { householdId } }),

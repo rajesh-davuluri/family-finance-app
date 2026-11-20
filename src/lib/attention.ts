@@ -81,6 +81,8 @@ export function attentionItems(input: {
   // Monthly close (src/lib/periodClose.ts): accounts whose latest period
   // isn't closed yet, and closed periods that no longer match.
   closes?: { name: string; currency: string; status: string; dueLabel: string | null; closedThrough: string | null; offNow: number }[];
+  // Lent & borrowed: people who have owed you a while (src/lib/personalLoans.ts).
+  owedToYou?: { name: string; amountUsd: number; since: string; days: number }[];
   // The payday planner's first dip under the cushion in the next 30 days
   // (src/lib/cashPlan.ts); when the planner ran, it replaces the rougher
   // "banks short of the card bills" check.
@@ -145,6 +147,15 @@ export function attentionItems(input: {
   for (const c of (input.closes ?? []).filter((x) => x.status === "CHANGED")) {
     const on = c.closedThrough ? new Date(`${c.closedThrough}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "its last close";
     items.push({ key: `close:changed:${c.name}`, level: "medium", text: `${c.name} changed after it was closed through ${on}: now ${fmt(c.offNow, c.currency)} off`, href: "/close" });
+  }
+  const owing = (input.owedToYou ?? []).sort((a, b) => b.days - a.days);
+  for (const o of owing.slice(0, 2)) {
+    const on = new Date(`${o.since}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    items.push({ key: `owed:${o.name}`, level: "medium", text: `${o.name} has owed you ${fmt(o.amountUsd)} since ${on} (${o.days} days)`, href: "/lent" });
+  }
+  if (owing.length > 2) {
+    const rest = owing.slice(2);
+    items.push({ key: "owed:more", level: "medium", text: `${rest.length} more ${rest.length === 1 ? "person has" : "people have"} owed you over a month: ${rest.map((o) => o.name).join(", ")}`, href: "/lent" });
   }
   for (const s of input.stale) {
     items.push({ key: `stale:${s.name}`, level: "medium", text: `${s.name}: nothing new for ${s.days} days — import a statement?`, href: "/import" });

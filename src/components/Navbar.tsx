@@ -26,6 +26,7 @@ const primaryLinks = [
 const moreLinks = [
   { href: "/year-ahead", label: "Year ahead" },
   { href: "/close", label: "Monthly close" },
+  { href: "/lent", label: "Lent & borrowed" },
   { href: "/cards", label: "Credit cards" },
   { href: "/reports", label: "Reports" },
   { href: "/investments", label: "Investments" },
@@ -50,6 +51,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
       { href: "/budgets", label: "Budgets", hint: "Limits by category" },
       { href: "/recurring", label: "Recurring bills", hint: "Rent, EMIs, subscriptions" },
       { href: "/debts", label: "Debts", hint: "Loans and what's left" },
+      { href: "/lent", label: "Lent & borrowed", hint: "Money with friends and family" },
       { href: "/goals", label: "Goals", hint: "Saving toward something" },
     ],
   },

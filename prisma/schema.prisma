@@ -65,6 +65,7 @@ model Household {
   duplicateDecisions DuplicateDecision[]
   investmentAccounts InvestmentAccount[]
   plannedExpenses    PlannedExpense[]
+  loanContacts       LoanContact[]
 }
 
 model User {
@@ -313,10 +314,16 @@ model Transaction {
 
   paycheck PaycheckDetail?
 
+  // Lent & borrowed: the person this money was lent to, borrowed from or
+  // repaid to -- see src/lib/personalLoans.ts.
+  loanContactId String?
+  loanContact   LoanContact? @relation(fields: [loanContactId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])
   @@index([splitGroupId])
+  @@index([loanContactId])
 }
 
 model RecurringTemplate {
@@ -777,4 +784,26 @@ model PeriodClose {
   createdAt DateTime @default(now())
 
   @@unique([instrumentId, periodEnd])
+}
+
+// Lent & borrowed: a friend or family member money moves to and from. The
+// balance is never stored: it's the starting balance plus the transactions
+// linked to them (money out adds to what they owe you, money in takes off).
+model LoanContact {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name String @db.NVarChar(200)
+  // Owed before the app's records, approx USD: positive = they owe you.
+  openingBalance Decimal   @default(0) @db.Decimal(14, 2)
+  openingDate    DateTime?
+  phone          String?   @db.NVarChar(50)
+  notes          String?   @db.NVarChar(1000)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([householdId, name])
 }
