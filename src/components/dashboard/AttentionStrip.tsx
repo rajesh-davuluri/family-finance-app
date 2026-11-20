@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
-import type { AttentionItem } from "@/lib/attention";
+import { ATTENTION_SHOWN, type AttentionItem } from "@/lib/attention";
 
 // The few things worth acting on now (src/lib/attention.ts), or "All clear".
 export default function AttentionStrip() {
   const [items, setItems] = useState<AttentionItem[] | null>(null);
+  const [all, setAll] = useState(false);
   const load = useCallback(() => {
     fetch("/api/dashboard/attention", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { items: [] }))
@@ -34,7 +35,7 @@ export default function AttentionStrip() {
         Needs attention · {items.length}
       </p>
       <ul className="space-y-1">
-        {items.map((i) => (
+        {(all ? items : items.slice(0, ATTENTION_SHOWN)).map((i) => (
           <li key={i.key}>
             <Link href={i.href} className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm text-ink-900 active:bg-amber-100">
               <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${i.level === "high" ? "bg-expense-500" : "bg-amber-500"}`} />
@@ -44,6 +45,11 @@ export default function AttentionStrip() {
           </li>
         ))}
       </ul>
+      {items.length > ATTENTION_SHOWN && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-1 px-1 py-1 text-xs font-medium text-amber-800 underline-offset-2 hover:underline" aria-expanded={all}>
+          {all ? "Show fewer" : `Show ${items.length - ATTENTION_SHOWN} more`}
+        </button>
+      )}
     </section>
   );
 }
