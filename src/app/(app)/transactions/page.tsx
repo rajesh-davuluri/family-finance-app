@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdjustmentCategory } from "@/lib/periodClose";
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import AddTransactionModal, { EditableTransaction } from "@/components/AddTransactionModal";
@@ -105,7 +106,7 @@ export default function TransactionsPage() {
     setInstruments(insts);
     setForm((f) => ({
       ...f,
-      categoryId: f.categoryId || cats[0]?.id || "",
+      categoryId: f.categoryId || (cats.find((c: { name: string }) => !isAdjustmentCategory(c.name)) ?? cats[0])?.id || "",
     }));
     await loadTransactions(EMPTY_SEARCH);
     setLoading(false);

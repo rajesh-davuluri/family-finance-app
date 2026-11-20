@@ -44,6 +44,10 @@ model Household {
   yearAheadSetAsideUsd  Decimal? @db.Decimal(12, 2)
   yearAheadPerPaydayUsd Decimal? @db.Decimal(12, 2)
 
+  // Monthly close: a difference up to this much (approx USD) can be accepted
+  // as a recorded balance adjustment without explaining it. Null = $10.
+  closeToleranceUsd Decimal? @db.Decimal(12, 2)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
@@ -132,6 +136,7 @@ model PaymentInstrument {
   details            AccountDetails?
   cardStatements     CardStatement[]
   balanceChecks      BalanceCheck[]
+  periodCloses       PeriodClose[]
 
   createdAt   DateTime @default(now())
 }
@@ -749,4 +754,27 @@ model BalanceCheck {
   createdAt DateTime @default(now())
 
   @@index([instrumentId, createdAt])
+}
+
+// Monthly close: an account checked against the bank's (or card's) own
+// figure for a period and closed. Any difference that was accepted is
+// recorded as a balance-adjustment transaction on the account, so it shows
+// in the history rather than disappearing -- see src/lib/periodClose.ts.
+model PeriodClose {
+  id           String            @id @default(uuid())
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  periodEnd       DateTime // closed through this day
+  statementFigure Decimal  @db.Decimal(14, 2) // the bank balance, or what the card says is owed, on periodEnd
+  appFigure       Decimal  @db.Decimal(14, 2) // what the app worked out for periodEnd, before any adjustment
+  adjustment      Decimal  @default(0) @db.Decimal(14, 2) // statementFigure - appFigure, when accepted
+  adjustmentTransactionId String? @db.NVarChar(64)
+  note            String?  @db.NVarChar(1000)
+  closedById      String   @db.NVarChar(64)
+  closedByName    String   @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@unique([instrumentId, periodEnd])
 }

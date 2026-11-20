@@ -1,5 +1,6 @@
 "use client";
 
+import { isAdjustmentCategory } from "@/lib/periodClose";
 import { useEffect, useRef, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
@@ -272,7 +273,8 @@ export default function AddTransactionModal({
         // No account is picked for you: choosing one is part of logging it.
         setForm((f) => ({
           ...f,
-          categoryId: cats[0]?.id || "",
+          // Never a Monthly close balance adjustment: those are made by closing.
+          categoryId: (cats.find((c: { name: string }) => !isAdjustmentCategory(c.name)) ?? cats[0])?.id || "",
           instrumentId: "",
         }));
       }

@@ -78,6 +78,9 @@ export function attentionItems(input: {
   // made a long time ago (src/lib/balanceCheck.ts).
   // `card`: a credit card checked against what the card says is owed.
   checks?: { name: string; currency: string; asOfDate: string; diff: number; matched: boolean; daysSince: number; card?: boolean }[];
+  // Monthly close (src/lib/periodClose.ts): accounts whose latest period
+  // isn't closed yet, and closed periods that no longer match.
+  closes?: { name: string; currency: string; status: string; dueLabel: string | null; closedThrough: string | null; offNow: number }[];
   // The payday planner's first dip under the cushion in the next 30 days
   // (src/lib/cashPlan.ts); when the planner ran, it replaces the rougher
   // "banks short of the card bills" check.
@@ -131,6 +134,17 @@ export function attentionItems(input: {
         href,
       });
     else if (c.daysSince >= CHECK_STALE_DAYS) items.push({ key: `check-old:${c.name}`, level: "medium", text: `${c.name} was last checked against the ${c.card ? "card" : "bank"} ${c.daysSince} days ago`, href });
+  }
+  const toClose = (input.closes ?? []).filter((c) => c.status === "DUE");
+  if (toClose.length === 1) {
+    items.push({ key: "close:due", level: "medium", text: `${toClose[0].name}: ${toClose[0].dueLabel ?? "the latest period"} isn't closed yet`, href: "/close" });
+  } else if (toClose.length > 1) {
+    const names = toClose.map((c) => c.name);
+    items.push({ key: "close:due", level: "medium", text: `${toClose.length} accounts to close for the period: ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`, href: "/close" });
+  }
+  for (const c of (input.closes ?? []).filter((x) => x.status === "CHANGED")) {
+    const on = c.closedThrough ? new Date(`${c.closedThrough}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "its last close";
+    items.push({ key: `close:changed:${c.name}`, level: "medium", text: `${c.name} changed after it was closed through ${on}: now ${fmt(c.offNow, c.currency)} off`, href: "/close" });
   }
   for (const s of input.stale) {
     items.push({ key: `stale:${s.name}`, level: "medium", text: `${s.name}: nothing new for ${s.days} days — import a statement?`, href: "/import" });

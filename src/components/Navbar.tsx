@@ -25,6 +25,7 @@ const primaryLinks = [
 
 const moreLinks = [
   { href: "/year-ahead", label: "Year ahead" },
+  { href: "/close", label: "Monthly close" },
   { href: "/cards", label: "Credit cards" },
   { href: "/reports", label: "Reports" },
   { href: "/investments", label: "Investments" },
@@ -65,6 +66,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
     title: "Records",
     links: [
       { href: "/reports", label: "Reports", hint: "Any period, CSV, PDF" },
+      { href: "/close", label: "Monthly close", hint: "Check every account each period" },
       { href: "/import", label: "Import", hint: "Bank and card statements" },
       { href: "/instruments", label: "Accounts & cards", hint: "Balances, details, transfers" },
       { href: "/categories", label: "Categories", hint: "Types and groups" },
