@@ -5,7 +5,7 @@ import Link from "next/link";
 import { money } from "@/lib/money";
 import { formatDate } from "@/lib/formatDate";
 import { FREQUENCY_LABELS } from "@/lib/recurringDetect";
-import { alertText, type Subscription, type SubscriptionAlert } from "@/lib/subscriptions";
+import { alertText, isHidden, type Subscription, type SubscriptionAlert } from "@/lib/subscriptions";
 
 // Subscriptions: everything that charges on a schedule -- streaming, apps,
 // memberships, phone plans -- found in the transactions, with price rises,
@@ -26,6 +26,7 @@ export default function SubscriptionsPage() {
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [showStopped, setShowStopped] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
 
   const load = useCallback(() => {
     fetch("/api/subscriptions", { cache: "no-store" })
@@ -35,7 +36,7 @@ export default function SubscriptionsPage() {
   }, []);
   useEffect(load, [load]);
 
-  async function mark(s: Subscription, status: "KEEP" | "CANCEL" | null) {
+  async function mark(s: Subscription, status: "KEEP" | "CANCEL" | "HIDDEN" | null) {
     setBusy(s.key);
     const r = await fetch("/api/subscriptions/mark", json("PUT", { key: s.key, status, amount: s.amount }));
     setBusy(null);
@@ -55,7 +56,8 @@ export default function SubscriptionsPage() {
   if (error) return <p className="text-sm text-expense-600">Couldn&apos;t load subscriptions. Try again in a moment.</p>;
   if (!data) return <p className="text-sm text-gray-400">Looking through your transactions...</p>;
 
-  const subs = data.subscriptions;
+  const hidden = data.subscriptions.filter(isHidden);
+  const subs = data.subscriptions.filter((s) => !isHidden(s));
   const current = subs.filter((s) => s.status === "ACTIVE" || s.status === "LATE");
   const once = subs.filter((s) => s.status === "SEEN_ONCE");
   const stopped = subs.filter((s) => s.status === "STOPPED");
@@ -136,12 +138,33 @@ export default function SubscriptionsPage() {
           )}
         </section>
       )}
+      {hidden.length > 0 && (
+        <section>
+          <button onClick={() => setShowHidden((v) => !v)} className="text-sm font-medium text-gray-700" aria-expanded={showHidden}>
+            {showHidden ? "▾" : "▸"} Not subscriptions · {hidden.length}
+          </button>
+          {showHidden && (
+            <ul className="mt-2 divide-y rounded-xl border bg-white">
+              {hidden.map((s) => (
+                <li key={s.key} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <span className="min-w-0 truncate">
+                    {s.name} <span className="text-gray-500">· {money(s.amount, s.currency)} · {s.accounts.join(", ")}</span>
+                  </span>
+                  <button disabled={busy === s.key} onClick={() => mark(s, null)} className="shrink-0 text-xs font-medium text-brand-700 hover:underline disabled:opacity-50">
+                    Show again
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
       <p className="text-xs text-gray-400">Found from repeating charges in your last year of transactions. Totals in approximate USD.</p>
     </div>
   );
 }
 
-function Row({ s, busy, onMark, onAdd }: { s: Subscription; busy: boolean; onMark: (s: Subscription, status: "KEEP" | "CANCEL" | null) => void; onAdd: (s: Subscription) => void }) {
+function Row({ s, busy, onMark, onAdd }: { s: Subscription; busy: boolean; onMark: (s: Subscription, status: "KEEP" | "CANCEL" | "HIDDEN" | null) => void; onAdd: (s: Subscription) => void }) {
   const live = s.status === "ACTIVE" || s.status === "LATE";
   const btn = (on: boolean, tone: string) => `min-h-[32px] rounded-md border px-2.5 text-xs font-medium disabled:opacity-50 ${on ? tone : "text-gray-600 hover:bg-gray-50"}`;
   return (
@@ -186,7 +209,15 @@ function Row({ s, busy, onMark, onAdd }: { s: Subscription; busy: boolean; onMar
             </button>
           )
         )}
-        {s.mark?.status === "CANCEL" && <span className="text-xs text-gray-500">Cancel it with {s.name.split(" (")[0]}; you&apos;ll be told if it charges again.</span>}
+        <button
+          disabled={busy}
+          onClick={() => onMark(s, "HIDDEN")}
+          className="ml-auto min-h-[32px] rounded-md px-2 text-xs text-gray-500 hover:text-gray-700 hover:underline disabled:opacity-50"
+          title="Hide it here: a repeating charge that isn't a subscription"
+        >
+          Not a subscription
+        </button>
+        {s.mark?.status === "CANCEL" && <span className="w-full text-xs text-gray-500">Cancel it with {s.name.split(" (")[0]}; you&apos;ll be told if it charges again.</span>}
       </div>
     </li>
   );

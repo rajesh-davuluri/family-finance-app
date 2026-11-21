@@ -52,6 +52,9 @@ export type EditableTransaction = {
   // When this is one part of a bill split by category: the whole charge.
   splitTotal?: number;
   splitParts?: number;
+  // Money with a person (Lent & borrowed): who, and which way it went.
+  loanPerson?: string | null;
+  loanWay?: "IN" | "OUT";
 };
 
 const SCAN_STAGE: Record<string, string> = {
@@ -269,9 +272,23 @@ export default function AddTransactionModal({
     setHasStoredPhoto(!!editingTransaction?.hasPhoto);
     setReceiptItems(null);
     setSplit(null);
-    setLoanType(null);
-    setPerson("");
+    // A transaction already linked to a person opens as that loan type.
+    const linked = editingTransaction?.loanPerson ?? null;
+    const notes = editingTransaction?.notes ?? "";
+    setLoanType(
+      linked
+        ? editingTransaction?.loanWay === "IN"
+          ? /^paid back by/i.test(notes) ? "REPAID_TO_YOU" : "BORROWED"
+          : /^paid back to/i.test(notes) ? "YOU_REPAID" : "LENT"
+        : null,
+    );
+    setPerson(linked ?? "");
     setPhone("");
+    if (linked && people === null)
+      fetch("/api/lent/names")
+        .then((r) => (r.ok ? r.json() : { people: [] }))
+        .then((j) => setPeople(j.people ?? []))
+        .catch(() => setPeople([]));
     pickFor.current = "attach";
     Promise.all([fetch("/api/categories"), fetch("/api/instruments")]).then(async ([catRes, instRes]) => {
       const cats = await catRes.json();
@@ -328,11 +345,13 @@ export default function AddTransactionModal({
         instrumentId: form.instrumentId,
         date: form.date,
         ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+        ...(isEditing ? { transactionId: editingTransaction!.id } : {}),
       }),
     });
     setSubmitting(false);
     const body = await res.json().catch(() => null);
     if (!res.ok) return setError(typeof body?.error === "string" ? body.error : "Couldn't save that.");
+    if (isEditing) return onSuccess();
     if (body?.person?.created) setPeople((old) => [...(old ?? []), { id: body.person.id, name: body.person.name }]);
     setForm((f) => ({ ...f, amount: "", notes: "" }));
     setPerson("");
@@ -367,6 +386,8 @@ export default function AddTransactionModal({
         ...form,
         amount: parseFloat(form.amount),
         ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
+        // Was money with a person, now spending or income: unlink them.
+        ...(isEditing && editingTransaction?.loanPerson ? { loanContactId: null } : {}),
       }),
     });
     setSubmitting(false);
@@ -480,7 +501,7 @@ export default function AddTransactionModal({
                 e.target.value = "";
               }}
             />
-            {!isEditing && !noSetupYet && (
+            {!noSetupYet && !(isEditing && (editingTransaction?.splitParts ?? 0) > 1) && (
               <div className="mb-3">
                 <p className="mb-1 text-xs font-medium text-gray-500">Type</p>
                 <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Type">

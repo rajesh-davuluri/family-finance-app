@@ -27,6 +27,7 @@ type Transaction = {
   importBatchId?: string | null;
   importBatch?: { fileName: string } | null;
   attachment?: { id: string } | null;
+  loanContact?: { name: string } | null;
   splitGroupId?: string | null;
 };
 
@@ -189,6 +190,8 @@ export default function TransactionsPage() {
       categoryId: t.category.id,
       instrumentId: t.instrument.id,
       hasPhoto: !!t.attachment,
+      loanPerson: t.loanContact?.name ?? null,
+      loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
       ...(t.splitGroupId
         ? (() => {
             const parts = transactions.filter((x) => x.splitGroupId === t.splitGroupId);

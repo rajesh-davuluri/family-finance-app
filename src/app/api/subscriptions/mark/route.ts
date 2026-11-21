@@ -3,10 +3,10 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 
-// Keep or Cancel a subscription, or clear the choice (status null).
+// Keep, Cancel or "Not a subscription" (HIDDEN), or clear the choice (null).
 const body = z.object({
   key: z.string().min(3).max(200),
-  status: z.enum(["KEEP", "CANCEL"]).nullable(),
+  status: z.enum(["KEEP", "CANCEL", "HIDDEN"]).nullable(),
   amount: z.number().min(0).max(100_000_000).nullable().optional(),
 });
 

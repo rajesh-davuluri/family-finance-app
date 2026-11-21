@@ -10,7 +10,9 @@
 
 import { merchantOf, type Frequency, type HistoryTxn, type RecurringBill } from "@/lib/recurringDetect";
 
-export type MarkStatus = "KEEP" | "CANCEL";
+// HIDDEN: "Not a subscription" -- a repeating charge that isn't one (a toll
+// top-up, a regular transfer). Kept out of the list, the totals and alerts.
+export type MarkStatus = "KEEP" | "CANCEL" | "HIDDEN";
 export type SubscriptionMarkInput = { key: string; status: MarkStatus; amount: number | null; markedAt: string };
 
 export type SubscriptionAlert =
@@ -45,7 +47,9 @@ export type Subscription = {
 
 // Not subscriptions: these have pages of their own (Debts, Policies, Year
 // ahead) or vary month to month (power, water, gas).
-const NOT_SUBSCRIPTION = /rent|mortgage|\bloan\b|\bemi\b|insurance|premium|tuition|class fee|daycare|\bhoa\b|\btax\b|electric|energy|power|water|\bgas\b|sewer|trash|utility bill/i;
+// Tolls and their top-ups, parking and transit repeat too, but aren't
+// subscriptions.
+const NOT_SUBSCRIPTION = /rent|mortgage|\bloan\b|\bemi\b|insurance|premium|tuition|class fee|daycare|\bhoa\b|\btax\b|electric|energy|power|water|\bgas\b|sewer|trash|utility bill|\btolls?\b|e-?z ?pass|sunpass|fastrak|i-?pass|peach pass|txtag|parking|park ?mobile|\btransit\b|metro ?card|smartrip|clipper|ventra|\bmta\b|\bwmata\b/i;
 // Names that are almost always a subscription, worth showing from the first
 // charge (a free trial that just turned into a paid plan).
 const KNOWN = /netflix|spotify|hulu|disney|youtube|apple\.com|itunes|icloud|google (one|storage|play)|prime video|amazon prime|audible|kindle unl|adobe|microsoft|xbox|playstation|nintendo|chatgpt|openai|anthropic|claude\.ai|peacock|paramount|hbo|max\.com|crunchyroll|patreon|substack|nytimes|new york times|wsj|washington post|duolingo|headspace|calm\.com|peloton|dropbox|zoom\.us|canva|grammarly|linkedin|siriusxm|hotstar|zee5|sonyliv|jiocinema|aha video|github|notion|1password|lastpass|nordvpn|expressvpn|match\.com|tinder|bumble|classpass|planet fitness|la fitness|ymca/i;
@@ -195,6 +199,7 @@ function build(
   const first = txns[0].date;
   if (!mark && gap(first, today) <= NEW_DAYS) alerts.push({ kind: "NEW", since: first });
 
+  if (mark?.status === "HIDDEN") alerts.length = 0;
   const rank = { CHARGED_AFTER_CANCEL: 0, DOUBLE: 1, PRICE_UP: 2, NEW: 3, PRICE_DOWN: 4 };
   alerts.sort((a, c) => rank[a.kind] - rank[c.kind]);
 
@@ -249,8 +254,10 @@ export function alertText(s: Subscription, a: SubscriptionAlert, money: (n: numb
   }
 }
 
+export const isHidden = (s: Subscription) => s.mark?.status === "HIDDEN";
+
 export function totals(subs: Subscription[]) {
-  const counted = subs.filter((s) => s.status === "ACTIVE" || s.status === "LATE");
+  const counted = subs.filter((s) => (s.status === "ACTIVE" || s.status === "LATE") && !isHidden(s));
   const perYear = counted.reduce((n, s) => n + s.perYearUsd, 0);
   const toCancel = counted.filter((s) => s.mark?.status === "CANCEL").reduce((n, s) => n + s.perYearUsd, 0);
   return { count: counted.length, perMonthUsd: r2(perYear / 12), perYearUsd: r2(perYear), toCancelPerYearUsd: r2(toCancel) };

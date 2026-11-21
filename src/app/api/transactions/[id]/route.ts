@@ -11,6 +11,8 @@ const updateSchema = z.object({
   notes: z.string().optional(),
   categoryId: z.string().optional(),
   instrumentId: z.string().optional(),
+  // null: no longer money with a person (Lent & borrowed).
+  loanContactId: z.null().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
