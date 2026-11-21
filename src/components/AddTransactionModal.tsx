@@ -22,6 +22,16 @@ type DuplicateInfo = {
   source: string;
   reason: string;
 };
+// Money with a person (Lent & borrowed): saved through /api/lent/record,
+// linked to the person, in a loan category (neither income nor spending).
+type LoanType = "LENT" | "BORROWED" | "REPAID_TO_YOU" | "YOU_REPAID";
+const LOAN_TYPES: { type: LoanType; label: string; hint: string }[] = [
+  { type: "LENT", label: "Lent money", hint: "You gave money to someone; they owe you." },
+  { type: "BORROWED", label: "Borrowed money", hint: "Someone gave you money; you owe them." },
+  { type: "REPAID_TO_YOU", label: "They paid you back", hint: "Someone paid back money you lent them." },
+  { type: "YOU_REPAID", label: "You paid back", hint: "You paid back money you borrowed." },
+];
+
 const SOURCE_WORDS: Record<string, string> = {
   IMPORTED: "imported from a statement",
   EMAIL: "from an email alert",
@@ -97,6 +107,11 @@ export default function AddTransactionModal({
   // Receipt items for splitting the bill by category, and what the split is.
   const [receiptItems, setReceiptItems] = useState<{ items: ReceiptItem[]; rules: Record<string, string>; n: number } | null>(null);
   const [split, setSplit] = useState<SplitValue | null>(null);
+  // A loan type instead of a category: who, and (for someone new) a phone.
+  const [loanType, setLoanType] = useState<LoanType | null>(null);
+  const [person, setPerson] = useState("");
+  const [phone, setPhone] = useState("");
+  const [people, setPeople] = useState<{ id: string; name: string }[] | null>(null);
   const pickFor = useRef<"attach" | "split">("attach");
 
   async function showItems(text: string) {
@@ -254,6 +269,9 @@ export default function AddTransactionModal({
     setHasStoredPhoto(!!editingTransaction?.hasPhoto);
     setReceiptItems(null);
     setSplit(null);
+    setLoanType(null);
+    setPerson("");
+    setPhone("");
     pickFor.current = "attach";
     Promise.all([fetch("/api/categories"), fetch("/api/instruments")]).then(async ([catRes, instRes]) => {
       const cats = await catRes.json();
@@ -283,8 +301,48 @@ export default function AddTransactionModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingTransaction?.id]);
 
+  function chooseLoanType(t: LoanType | null) {
+    setLoanType(t);
+    setError(null);
+    setDuplicate(null);
+    // The names, only once a loan type is wanted.
+    if (t && people === null)
+      fetch("/api/lent/names")
+        .then((r) => (r.ok ? r.json() : { people: [] }))
+        .then((j) => setPeople(j.people ?? []))
+        .catch(() => setPeople([]));
+  }
+
+  async function submitLoan() {
+    if (!person.trim()) return setError("Who was it with? Type a name.");
+    if (!form.instrumentId) return setError("Choose the account the money went out of or into.");
+    setSubmitting(true);
+    const res = await fetch("/api/lent/record", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: loanType,
+        person: person.trim(),
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
+        amount: parseFloat(form.amount),
+        instrumentId: form.instrumentId,
+        date: form.date,
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+      }),
+    });
+    setSubmitting(false);
+    const body = await res.json().catch(() => null);
+    if (!res.ok) return setError(typeof body?.error === "string" ? body.error : "Couldn't save that.");
+    if (body?.person?.created) setPeople((old) => [...(old ?? []), { id: body.person.id, name: body.person.name }]);
+    setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setPerson("");
+    setPhone("");
+    onSuccess();
+  }
+
   async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
+    if (loanType) return submitLoan();
     // "Add anyway" after the warning: the transaction it looked like.
     const notDuplicateOf = allowDuplicate ? duplicate?.id : undefined;
     setError(null);
@@ -422,7 +480,31 @@ export default function AddTransactionModal({
                 e.target.value = "";
               }}
             />
-            {!noSetupYet && (
+            {!isEditing && !noSetupYet && (
+              <div className="mb-3">
+                <p className="mb-1 text-xs font-medium text-gray-500">Type</p>
+                <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Type">
+                  {[{ type: null, label: "Spending / income" }, ...LOAN_TYPES].map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={loanType === o.type}
+                      onClick={() => chooseLoanType(o.type)}
+                      className={`min-h-[36px] rounded-full border px-3 text-xs font-medium ${loanType === o.type ? "border-ink-900 bg-ink-900 text-white" : "text-gray-700 hover:bg-gray-50"}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                {loanType && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    {LOAN_TYPES.find((t) => t.type === loanType)!.hint} Shows on Lent &amp; borrowed; not counted as income or spending.
+                  </p>
+                )}
+              </div>
+            )}
+            {!noSetupYet && !loanType && (
               <div className="mb-3 space-y-2">
                 {!isEditing && !photoUrl && !scan && (
                   <button
@@ -564,10 +646,42 @@ export default function AddTransactionModal({
                   Category: split across {split!.parts.length} (above)
                 </p>
               )}
+              {loanType && (
+                <>
+                  <input
+                    type="text"
+                    required
+                    list="loan-people"
+                    placeholder={loanType === "LENT" || loanType === "YOU_REPAID" ? "To whom? (name)" : "From whom? (name)"}
+                    aria-label="Person"
+                    value={person}
+                    onChange={(e) => setPerson(e.target.value)}
+                    className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
+                  />
+                  <datalist id="loan-people">
+                    {(people ?? []).map((p) => (
+                      <option key={p.id} value={p.name} />
+                    ))}
+                  </datalist>
+                  {person.trim() && people !== null && !people.some((p) => p.name.toLowerCase() === person.trim().toLowerCase()) && (
+                    <>
+                      <p className="text-xs text-gray-500 sm:col-span-2">New person: {person.trim()} will be added to Lent &amp; borrowed.</p>
+                      <input
+                        type="tel"
+                        placeholder="Their phone (optional, for reminders)"
+                        aria-label="Phone"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
+                      />
+                    </>
+                  )}
+                </>
+              )}
               <select
                 value={form.categoryId}
                 onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${splitOn ? "hidden" : ""}`}
+                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${splitOn || loanType ? "hidden" : ""}`}
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
