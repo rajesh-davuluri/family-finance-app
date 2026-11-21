@@ -13,6 +13,8 @@ const body = z.object({
   instrumentId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   notes: z.string().trim().max(500).optional(),
+  // Editing: turn this transaction into the loan entry.
+  transactionId: z.string().min(1).optional(),
 });
 
 export async function POST(req: Request) {
@@ -33,7 +35,8 @@ export async function POST(req: Request) {
     instrumentId: f.instrumentId,
     date: f.date,
     notes: f.notes,
+    transactionId: f.transactionId,
   });
   if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
-  return NextResponse.json({ id: r.id, person: { id: person.id, name: person.name, created: person.created } }, { status: 201 });
+  return NextResponse.json({ id: r.id, person: { id: person.id, name: person.name, created: person.created } }, { status: f.transactionId ? 200 : 201 });
 }

@@ -26,6 +26,7 @@ type Txn = {
   category: { id: string; name: string; direction: string };
   instrument: { id: string; name: string };
   attachment?: { id: string } | null;
+  loanContact?: { name: string } | null;
   splitGroupId?: string | null;
 };
 
@@ -184,6 +185,8 @@ function TransactionList({ drill, onEdit }: { drill: Extract<Drill, { kind: "tra
                     categoryId: t.category.id,
                     instrumentId: t.instrument.id,
                     hasPhoto: !!t.attachment,
+                    loanPerson: t.loanContact?.name ?? null,
+                    loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
                   })
                 }
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left active:bg-gray-50"

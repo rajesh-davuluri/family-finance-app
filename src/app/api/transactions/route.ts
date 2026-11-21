@@ -45,6 +45,7 @@ export async function GET(req: Request) {
       createdBy: { select: { name: true } },
       importBatch: { select: { fileName: true } },
       attachment: { select: { id: true } },
+      loanContact: { select: { name: true } },
     },
     orderBy: { date: "desc" },
     take: limit,

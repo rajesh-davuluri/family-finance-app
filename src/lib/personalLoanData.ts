@@ -171,24 +171,32 @@ export async function recordLoanMoney(input: {
   instrumentId: string;
   date: string; // YYYY-MM-DD
   notes?: string;
+  // Turn this existing transaction into the loan entry instead of adding one.
+  transactionId?: string;
 }): Promise<{ id: string } | { error: string }> {
   const inst = await prisma.paymentInstrument.findUnique({ where: { id: input.instrumentId } });
   if (!inst || inst.householdId !== input.householdId) return { error: "Choose an account." };
   const categoryId = await loanCategoryId(input.householdId, input.way === "IN" ? "INCOME" : "EXPENSE");
   const fallback = input.type ? NOTE[input.type](input.personName) : input.way === "IN" ? `From ${input.personName}` : `To ${input.personName}`;
+  const fields = {
+    amount: input.amount,
+    currency: inst.currency,
+    date: new Date(`${input.date}T00:00:00Z`),
+    notes: input.notes || fallback,
+    categoryId,
+    instrumentId: inst.id,
+    loanContactId: input.personId,
+  };
+  if (input.transactionId) {
+    const existing = await prisma.transaction.findUnique({ where: { id: input.transactionId } });
+    if (!existing || existing.householdId !== input.householdId) return { error: "That transaction wasn't found." };
+    // A part of a split bill stays a purchase: the split would no longer add up.
+    if (existing.splitGroupId) return { error: "This is part of a split bill, so it can't become a loan. Remove the split first." };
+    await prisma.transaction.update({ where: { id: existing.id }, data: fields });
+    return { id: existing.id };
+  }
   const txn = await prisma.transaction.create({
-    data: {
-      amount: input.amount,
-      currency: inst.currency,
-      date: new Date(`${input.date}T00:00:00Z`),
-      notes: input.notes || fallback,
-      householdId: input.householdId,
-      categoryId,
-      instrumentId: inst.id,
-      createdById: input.userId,
-      source: "MANUAL",
-      loanContactId: input.personId,
-    },
+    data: { ...fields, householdId: input.householdId, createdById: input.userId, source: "MANUAL" },
   });
   return { id: txn.id };
 }
