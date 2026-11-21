@@ -19,6 +19,8 @@ const usd = (n: number, d = 2) => money(n, "USD", d);
 const day = (d: string) => formatDate(d, { month: "short", day: "numeric", year: "numeric" });
 const json = (method: string, body: unknown) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+const peopleCount = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+
 function owesLine(p: { name: string; balanceUsd: number }) {
   if (p.balanceUsd > 0) return `${p.name.split(/\s+/)[0]} owes you ${usd(p.balanceUsd)}`;
   if (p.balanceUsd < 0) return `You owe ${p.name.split(/\s+/)[0]} ${usd(-p.balanceUsd)}`;
@@ -79,12 +81,12 @@ export default function LentPage() {
         <div className="rounded-xl bg-ink-900 p-4 text-white shadow-sm">
           <p className="text-xs uppercase tracking-wide text-ink-300">Owed to you</p>
           <p className="font-display mt-1 text-3xl tabular-nums text-brand-300">{usd(owedToYou)}</p>
-          <p className="text-sm text-ink-300">{open.filter((p) => p.balanceUsd > 0).length} people</p>
+          <p className="text-sm text-ink-300">{peopleCount(open.filter((p) => p.balanceUsd > 0).length)}</p>
         </div>
         <div className="rounded-xl border bg-white p-4 shadow-sm">
           <p className="text-xs uppercase tracking-wide text-gray-500">You owe</p>
           <p className={`font-display mt-1 text-3xl tabular-nums ${youOwe > 0 ? "text-expense-600" : ""}`}>{usd(youOwe)}</p>
-          <p className="text-sm text-gray-500">{open.filter((p) => p.balanceUsd < 0).length} people</p>
+          <p className="text-sm text-gray-500">{peopleCount(open.filter((p) => p.balanceUsd < 0).length)}</p>
         </div>
       </section>
 

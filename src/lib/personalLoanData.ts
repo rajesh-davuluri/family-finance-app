@@ -143,3 +143,62 @@ export const personFields = z.object({
   phone: z.string().trim().max(50).nullable().optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
 });
+
+// What a loan entry is, from the household's side. The way money moves
+// follows from it: lending and paying back go out; borrowing and being paid
+// back come in.
+export const LOAN_TYPES = ["LENT", "BORROWED", "REPAID_TO_YOU", "YOU_REPAID"] as const;
+export type LoanType = (typeof LOAN_TYPES)[number];
+export const wayOf = (t: LoanType): "IN" | "OUT" => (t === "BORROWED" || t === "REPAID_TO_YOU" ? "IN" : "OUT");
+const NOTE: Record<LoanType, (name: string) => string> = {
+  LENT: (n) => `Lent to ${n}`,
+  BORROWED: (n) => `Borrowed from ${n}`,
+  REPAID_TO_YOU: (n) => `Paid back by ${n}`,
+  YOU_REPAID: (n) => `Paid back to ${n}`,
+};
+
+// Money with a person, saved as a transaction on the account in a loan
+// category (neither income nor spending), linked to the person -- what both
+// Lent & borrowed and Add Transaction record.
+export async function recordLoanMoney(input: {
+  householdId: string;
+  userId: string;
+  personId: string;
+  personName: string;
+  way: "IN" | "OUT";
+  type?: LoanType;
+  amount: number;
+  instrumentId: string;
+  date: string; // YYYY-MM-DD
+  notes?: string;
+}): Promise<{ id: string } | { error: string }> {
+  const inst = await prisma.paymentInstrument.findUnique({ where: { id: input.instrumentId } });
+  if (!inst || inst.householdId !== input.householdId) return { error: "Choose an account." };
+  const categoryId = await loanCategoryId(input.householdId, input.way === "IN" ? "INCOME" : "EXPENSE");
+  const fallback = input.type ? NOTE[input.type](input.personName) : input.way === "IN" ? `From ${input.personName}` : `To ${input.personName}`;
+  const txn = await prisma.transaction.create({
+    data: {
+      amount: input.amount,
+      currency: inst.currency,
+      date: new Date(`${input.date}T00:00:00Z`),
+      notes: input.notes || fallback,
+      householdId: input.householdId,
+      categoryId,
+      instrumentId: inst.id,
+      createdById: input.userId,
+      source: "MANUAL",
+      loanContactId: input.personId,
+    },
+  });
+  return { id: txn.id };
+}
+
+// The person with this name (any letter case), added if they're new.
+export async function findOrAddPerson(householdId: string, name: string, phone?: string | null) {
+  const clean = name.trim().replace(/\s+/g, " ");
+  const all = await prisma.loanContact.findMany({ where: { householdId }, select: { id: true, name: true } });
+  const found = all.find((p) => p.name.toLowerCase() === clean.toLowerCase());
+  if (found) return { ...found, created: false };
+  const p = await prisma.loanContact.create({ data: { householdId, name: clean, phone: phone || null } });
+  return { id: p.id, name: p.name, created: true };
+}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
-import { loanCategoryId } from "@/lib/personalLoanData";
+import { recordLoanMoney } from "@/lib/personalLoanData";
 
 // Record money with a person: "They paid me" (money in: they repay you, or
 // you borrow) or "I paid them" (money out: you lend, or repay what you
@@ -26,24 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const person = await prisma.loanContact.findUnique({ where: { id } });
   if (!person || person.householdId !== user.householdId) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const inst = await prisma.paymentInstrument.findUnique({ where: { id: f.instrumentId } });
-  if (!inst || inst.householdId !== user.householdId) return NextResponse.json({ error: "Choose an account." }, { status: 400 });
-
-  const direction = f.way === "IN" ? "INCOME" : "EXPENSE";
-  const categoryId = await loanCategoryId(user.householdId, direction);
-  const txn = await prisma.transaction.create({
-    data: {
-      amount: f.amount,
-      currency: inst.currency,
-      date: new Date(`${f.date}T00:00:00Z`),
-      notes: f.notes || (f.way === "IN" ? `From ${person.name}` : `To ${person.name}`),
-      householdId: user.householdId,
-      categoryId,
-      instrumentId: inst.id,
-      createdById: user.id,
-      source: "MANUAL",
-      loanContactId: person.id,
-    },
-  });
-  return NextResponse.json({ id: txn.id }, { status: 201 });
+  const r = await recordLoanMoney({ householdId: user.householdId, userId: user.id, personId: person.id, personName: person.name, way: f.way, amount: f.amount, instrumentId: f.instrumentId, date: f.date, notes: f.notes });
+  if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
+  return NextResponse.json({ id: r.id }, { status: 201 });
 }
