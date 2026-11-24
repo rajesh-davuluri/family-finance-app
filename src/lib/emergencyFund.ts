@@ -29,3 +29,38 @@ export function emergencyFund(input: { cashUsd: number; months: { essentials: nu
     perPaycheck12: r(gap / perYear),
   };
 }
+
+// How fast the fund is growing and when it reaches the target at that pace.
+// `added` is the net money put in (minus taken out) since `since`, a
+// YYYY-MM-DD no more than three months back (later when the fund's records
+// start later). The window counts as at least one month, so one deposit
+// made today isn't read as a pace of thousands a day. Pure.
+export const PACE_MONTHS = 3;
+const DAYS_PER_MONTH = 30.44;
+const MAX_MONTHS_AHEAD = 120;
+
+export function fundPace(input: { added: number; since: string; today: string; gap: number }) {
+  const days = (Date.parse(input.today) - Date.parse(input.since)) / 86_400_000;
+  const months = Math.max(1, days / DAYS_PER_MONTH);
+  const perMonth = Math.round((input.added / months) * 100) / 100;
+  let monthsToTarget: number | null = null;
+  let reachBy: string | null = null; // YYYY-MM
+  if (input.gap <= 0.5) monthsToTarget = 0;
+  else if (perMonth > 0.5) {
+    const need = Math.ceil(input.gap / perMonth);
+    if (need <= MAX_MONTHS_AHEAD) {
+      monthsToTarget = need;
+      const [y, m] = input.today.split("-").map(Number);
+      reachBy = new Date(Date.UTC(y, m - 1 + need, 1)).toISOString().slice(0, 7);
+    }
+  }
+  return { perMonth, paceMonths: Math.round(months * 10) / 10, monthsToTarget, reachBy };
+}
+
+// The day `months` calendar months before a YYYY-MM-DD (clamped to the
+// month's last day, so Mar 31 less one month is Feb 28/29).
+export function monthsBefore(day: string, months: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m - 1 - months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 - months, Math.min(d, last))).toISOString().slice(0, 10);
+}
