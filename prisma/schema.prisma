@@ -32,6 +32,8 @@ model Household {
   // The emergency fund: money set aside for emergencies (typed in), and how
   // many months of essential spending it should cover. A bank account named
   // "Emergency..." with a balance takes the place of the typed-in amount.
+  // emergencyFundUsd is the starting amount; the fund is that plus every
+  // EmergencyFundEntry (money added or taken out since).
   emergencyFundUsd     Decimal? @db.Decimal(12, 2)
   emergencyTargetMonths Int      @default(6)
 
@@ -71,6 +73,7 @@ model Household {
   plannedExpenses    PlannedExpense[]
   loanContacts       LoanContact[]
   subscriptionMarks  SubscriptionMark[]
+  emergencyFundEntries EmergencyFundEntry[]
 }
 
 model User {
@@ -101,6 +104,7 @@ model User {
   notifications       Notification[]
   importBatches       ImportBatch[]
   telegramLinks       TelegramLink[]
+  emergencyFundEntries EmergencyFundEntry[]
 }
 
 model PaymentInstrument {
@@ -828,4 +832,24 @@ model SubscriptionMark {
   markedAt DateTime @default(now())
 
   @@unique([householdId, key])
+}
+
+// Money added to (positive) or taken out of (negative) the typed-in
+// emergency fund, approx USD, and which household member put it in (null =
+// joint). Not used when the fund is a bank account named "Emergency...":
+// that account's own transfers and transactions are its history.
+model EmergencyFundEntry {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  date      DateTime
+  amountUsd Decimal  @db.Decimal(12, 2)
+  byUserId  String?
+  byUser    User?    @relation(fields: [byUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  note      String?  @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, date])
 }

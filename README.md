@@ -16,6 +16,7 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Money summary on Telegram** — every Sunday, last week's income and expenses by category and what was left over; on the 1st, the same for the month (Settings → Telegram bot)
 - **Subscriptions** — every charge that repeats (streaming, apps, memberships, phone), found in your transactions: what they cost a month and a year, price rises, double charges, new ones, and anything charged after you chose to cancel
 - **Lent & borrowed** — money between you and friends or family, by person: who owes whom and since when, repayments, a friendly reminder to copy, and the balances in net worth
+- **Emergency fund** — months of essential spending covered against a 3, 6 or 12-month target; "Add money" and "Take out" record who put money in (kept as history), with this month's additions, the pace of the last three months, and when the target is reached at that pace
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 
 ## 1. Prerequisites
