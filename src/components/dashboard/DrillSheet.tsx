@@ -27,6 +27,7 @@ type Txn = {
   instrument: { id: string; name: string };
   attachment?: { id: string } | null;
   loanContact?: { name: string } | null;
+  rewardsAmount?: string | number | null;
   splitGroupId?: string | null;
 };
 
@@ -186,6 +187,7 @@ function TransactionList({ drill, onEdit }: { drill: Extract<Drill, { kind: "tra
                     instrumentId: t.instrument.id,
                     hasPhoto: !!t.attachment,
                     loanPerson: t.loanContact?.name ?? null,
+                    rewardsAmount: t.rewardsAmount == null ? null : Number(t.rewardsAmount),
                     loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
                   })
                 }
@@ -205,6 +207,7 @@ function TransactionList({ drill, onEdit }: { drill: Extract<Drill, { kind: "tra
                 <span className={`shrink-0 text-sm font-medium tabular-nums ${t.category.direction === "INCOME" ? "text-income-600" : ""}`}>
                   {t.category.direction === "INCOME" ? "+" : ""}
                   {money(Number(t.amount), t.currency)}
+                  {Number(t.rewardsAmount ?? 0) > 0 && <span className="block text-[11px] font-normal text-income-600">+{money(Number(t.rewardsAmount), t.currency)} rewards</span>}
                 </span>
               </button>
             </li>

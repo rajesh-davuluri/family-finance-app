@@ -13,6 +13,8 @@ const createSchema = z.object({
   notes: z.string().optional(),
   categoryId: z.string(),
   instrumentId: z.string(),
+  // Paid with card rewards / cashback on top of `amount` (what was charged).
+  rewardsAmount: z.number().min(0).max(10_000_000).nullable().optional(),
   // Set after the person has seen the duplicate warning and chosen to add it anyway.
   allowDuplicate: z.boolean().optional(),
   // Added anyway after the duplicate warning: remember that pair is fine.
@@ -102,6 +104,7 @@ export async function POST(req: Request) {
       notes: data.notes,
       categoryId: data.categoryId,
       instrumentId: data.instrumentId,
+      rewardsAmount: data.rewardsAmount ? data.rewardsAmount : null,
       householdId: user.householdId,
       createdById: user.id,
     },

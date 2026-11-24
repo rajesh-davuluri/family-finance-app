@@ -28,6 +28,7 @@ type Transaction = {
   importBatch?: { fileName: string } | null;
   attachment?: { id: string } | null;
   loanContact?: { name: string } | null;
+  rewardsAmount?: string | number | null;
   splitGroupId?: string | null;
 };
 
@@ -191,6 +192,7 @@ export default function TransactionsPage() {
       instrumentId: t.instrument.id,
       hasPhoto: !!t.attachment,
       loanPerson: t.loanContact?.name ?? null,
+      rewardsAmount: t.rewardsAmount == null ? null : Number(t.rewardsAmount),
       loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
       ...(t.splitGroupId
         ? (() => {
@@ -507,6 +509,7 @@ export default function TransactionsPage() {
                     <span className={`shrink-0 text-[15px] font-medium tabular-nums ${income ? "text-income-600" : "text-ink-900"}`}>
                       {income ? "+" : ""}
                       {money(Number(t.amount), t.currency)}
+                      {Number(t.rewardsAmount ?? 0) > 0 && <span className="block text-[11px] font-normal text-income-600">+{money(Number(t.rewardsAmount), t.currency)} rewards</span>}
                     </span>
                   </button>
                 </li>
@@ -560,6 +563,7 @@ export default function TransactionsPage() {
                   >
                     {t.category.direction === "INCOME" ? "+" : "−"}
                     {money(Number(t.amount), t.currency)}
+                    {Number(t.rewardsAmount ?? 0) > 0 && <span className="block text-[11px] font-normal text-income-600">+{money(Number(t.rewardsAmount), t.currency)} rewards</span>}
                   </td>
                   <td className="space-x-3 p-3 text-right">
                     <button onClick={() => edit(t)} className="text-xs text-brand-600 hover:underline">

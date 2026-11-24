@@ -461,7 +461,7 @@ function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> 
     {
       label: "Spent",
       value: usd(summary.spent),
-      sub: `${plural(summary.expenseCount, "transaction")}${summary.refunds > 0 ? ` · after ${usd(summary.refunds)} refunds` : ""}`,
+      sub: `${plural(summary.expenseCount, "transaction")}${summary.refunds > 0 ? ` · after ${usd(summary.refunds)} refunds` : ""}${summary.rewardsUsed > 0 ? ` · +${usd(summary.rewardsUsed)} paid with rewards` : ""}`,
     },
     { label: "Received", value: usd(summary.received), sub: plural(summary.incomeCount, "transaction") },
     { label: "Net", value: `${summary.net < 0 ? "−" : ""}${usd(Math.abs(summary.net))}`, sub: "received − spent" },
@@ -494,6 +494,7 @@ function SummaryView({ summary }: { summary: ReturnType<typeof spendingSummary> 
       </div>
       <p className="text-xs text-gray-400">
         {summary.saved > 0 && <>Saved or invested: {usd(summary.saved)} (not spending). </>}
+        {summary.rewardsUsed > 0 && <>Paid with card rewards / cashback: {usd(summary.rewardsUsed)} (on top of spending: what purchases cost beyond what the cards charged). </>}
         {summary.notCounted.count > 0 && (
           <>
             Not counted as income or spending: {usd(summary.notCounted.usd)} in card payments, transfers and loans (

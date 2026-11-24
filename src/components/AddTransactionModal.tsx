@@ -55,6 +55,8 @@ export type EditableTransaction = {
   // Money with a person (Lent & borrowed): who, and which way it went.
   loanPerson?: string | null;
   loanWay?: "IN" | "OUT";
+  // Part of the price paid with card rewards / cashback.
+  rewardsAmount?: number | null;
 };
 
 const SCAN_STAGE: Record<string, string> = {
@@ -115,6 +117,9 @@ export default function AddTransactionModal({
   const [person, setPerson] = useState("");
   const [phone, setPhone] = useState("");
   const [people, setPeople] = useState<{ id: string; name: string }[] | null>(null);
+  // Paid part of the price with card rewards or cashback: how much.
+  const [rewardsOpen, setRewardsOpen] = useState(false);
+  const [rewards, setRewards] = useState("");
   const pickFor = useRef<"attach" | "split">("attach");
 
   async function showItems(text: string) {
@@ -284,6 +289,9 @@ export default function AddTransactionModal({
     );
     setPerson(linked ?? "");
     setPhone("");
+    const r = editingTransaction?.rewardsAmount ?? 0;
+    setRewards(r > 0 ? String(r) : "");
+    setRewardsOpen(r > 0);
     if (linked && people === null)
       fetch("/api/lent/names")
         .then((r) => (r.ok ? r.json() : { people: [] }))
@@ -386,6 +394,8 @@ export default function AddTransactionModal({
         ...form,
         amount: parseFloat(form.amount),
         ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
+        // Paid with rewards on top of the amount charged (0 clears it).
+        ...(isExpense && rewardsOpen ? { rewardsAmount: parseFloat(rewards) || 0 } : isEditing && (editingTransaction?.rewardsAmount ?? 0) > 0 ? { rewardsAmount: 0 } : {}),
         // Was money with a person, now spending or income: unlink them.
         ...(isEditing && editingTransaction?.loanPerson ? { loanContactId: null } : {}),
       }),
@@ -406,6 +416,10 @@ export default function AddTransactionModal({
     const photoError = saved?.id ? await savePhoto(saved.id) : null;
     if (photoError) window.alert(`The transaction was saved, but ${photoError}. Open it and attach the photo again.`);
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
+    if (!isEditing) {
+      setRewards("");
+      setRewardsOpen(false);
+    }
     setNewPhoto(null);
     setScanNote(null);
     setDuplicate(null);
@@ -662,6 +676,49 @@ export default function AddTransactionModal({
                   </option>
                 ))}
               </select>
+              {!loanType && !splitOn && isExpense && (
+                <div className="sm:col-span-2">
+                  {!rewardsOpen ? (
+                    <button type="button" onClick={() => setRewardsOpen(true)} className="text-xs font-medium text-brand-700 hover:underline">
+                      + Paid part with rewards or cashback?
+                    </button>
+                  ) : (
+                    <div className="rounded-md border border-dashed p-2.5">
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="rewards" className="text-sm text-gray-700">
+                          Paid with rewards / cashback
+                        </label>
+                        <input
+                          id="rewards"
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={rewards}
+                          onChange={(e) => setRewards(e.target.value)}
+                          className="w-28 rounded-md border px-2 py-1.5 text-sm tabular-nums"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRewardsOpen(false);
+                            setRewards("");
+                          }}
+                          className="ml-auto text-xs text-gray-500 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {parseFloat(rewards) > 0 && parseFloat(form.amount) > 0
+                          ? `Full price ${money(parseFloat(form.amount) + parseFloat(rewards), form.currency)}: card charged ${money(parseFloat(form.amount), form.currency)} + ${money(parseFloat(rewards), form.currency)} rewards.`
+                          : "Amount above = what the card was charged (as on the statement). Rewards = the part paid with points or cashback."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               {splitOn && (
                 <p className="rounded-md border border-dashed px-3 py-2 text-sm text-gray-600 sm:col-span-2">
                   Category: split across {split!.parts.length} (above)
