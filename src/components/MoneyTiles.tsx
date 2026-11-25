@@ -111,8 +111,12 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
       .map((a) => ({ key: `bank:${a.name}`, label: a.name, sub: "in the bank now", amount: a.usd!, currency: "USD" }));
     for (const e of p.dueBeforePayday) rows.push({ key: e.key, label: e.label, sub: `due ${short(e.date)}${e.sub ? ` · ${e.sub}` : ""}`, amount: -e.paid, currency: "USD" });
     if (p.held > 0) rows.push({ key: "held", label: "Set aside for the year ahead", sub: "big costs later in the year", amount: -p.held, currency: "USD" });
+    // Bills after payday the paycheck won't fully cover: held back now.
+    const later = p.keptForLater;
+    const laterWhy = later ? later.causes.map((c) => `${c.label} ${money(c.paid, "USD", 0)} (${short(c.date)})`).join(", ") : "";
+    if (later) rows.push({ key: "later", label: "Kept for bills after payday", sub: `the paycheck won't cover all of: ${laterWhy}`, amount: -later.usd, currency: "USD" });
     const left = planner.accounts.filter((a) => !a.counted && a.note && a.note !== "no balance set").map((a) => `${a.name} (${a.note})`);
-    return { amount: p.safe, rows, payday: p.payday, notCounted: left };
+    return { amount: p.safe, rows, payday: p.payday, notCounted: left, later: later ? { usd: later.usd, why: laterWhy } : null };
   })();
   const payday = safe?.payday ?? null;
 
@@ -209,6 +213,11 @@ export default function MoneyTiles({ onDrill }: { onDrill?: (d: Drill) => void }
             <span className="text-ink-300">{payday ? `Safe to spend until payday (${short(payday)})` : "Safe to spend"} ›</span>
             <span className={`font-display text-lg tabular-nums ${safe.amount < 0 ? "text-red-300" : "text-brand-300"}`}>{money(safe.amount, "USD")}</span>
           </button>
+        )}
+        {safe?.later && (
+          <p className="mt-1 text-xs text-amber-200">
+            {money(safe.later.usd, "USD")} held back for bills after payday the paycheck won&apos;t fully cover: {safe.later.why}.
+          </p>
         )}
         {missingBalance.length > 0 && inBank.size > 0 && (
           <p className="mt-2 text-xs text-ink-300">Not counted: {missingBalance.map((b) => b.name).join(", ")} (no balance set)</p>

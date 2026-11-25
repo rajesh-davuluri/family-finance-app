@@ -114,8 +114,36 @@ export function cashPlan(input: PlanInput) {
   // pays for before payday, which is already in `committed`.
   const plannedSoon = (input.plannedDue ?? []).filter((d) => (payday ? d.date < payday : d.date <= last)).reduce((s, d) => s + d.usd, 0);
   const held = r2(Math.max(0, (input.setAsideUsd ?? 0) - plannedSoon));
-  const safe = r2(input.cashUsd - committed - whatIfNow - held);
+  const beforeBills = r2(input.cashUsd - committed - whatIfNow - held);
   const daysToPayday = payday ? daysBetween(input.today, payday) : null;
+
+  // ...and no more than the next paycheck leaves room for. Money spent now
+  // is missing on every day after, so it mustn't push cash under the cushion
+  // later in the window -- when the card bills still open (charges not on a
+  // statement yet), rent or a loan payment come due after payday and the
+  // paycheck doesn't cover them. Day-to-day spending before payday is what
+  // safe to spend is for, so it's added back.
+  let keptForLater: { usd: number; lowDate: string; causes: { label: string; date: string; paid: number }[] } | null = null;
+  let safe = beforeBills;
+  const from = payday ? timeline.findIndex((d) => d.date >= payday) : -1;
+  if (from > 0 && beforeBills > 0) {
+    const everydayBefore = timeline.slice(0, from).reduce((n, d) => n + d.everyday, 0);
+    let low = from;
+    for (let i = from; i < timeline.length; i++) if (timeline[i].balance < timeline[low].balance) low = i;
+    const room = r2(timeline[low].balance + everydayBefore - input.cushionUsd - held);
+    if (room < beforeBills) {
+      safe = r2(Math.max(0, room));
+      keptForLater = {
+        usd: r2(beforeBills - safe),
+        lowDate: timeline[low].date,
+        causes: timeline
+          .slice(from, low + 1)
+          .flatMap((d) => d.events.filter((e) => e.kind !== "PAYCHECK" && !e.key.startsWith("whatif:")).map((e) => ({ label: e.label, date: d.date, paid: r2(e.paid) })))
+          .sort((a, b) => b.paid - a.paid)
+          .slice(0, 3),
+      };
+    }
+  }
 
   // Spells under the cushion, with the outflows that led into each.
   const tight: TightSpell[] = [];
@@ -148,6 +176,10 @@ export function cashPlan(input: PlanInput) {
   const lowest = timeline.reduce((m, d) => (d.balance < m.balance ? d : m), timeline[0]);
   return {
     safe,
+    // Bank cash less what's due before payday (and the money set aside), and
+    // the part of it held back for bills after payday (null: none).
+    beforeBills,
+    keptForLater,
     committed,
     whatIfNow,
     held,
