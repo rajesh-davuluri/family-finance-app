@@ -19,6 +19,16 @@ export function roundUp(n: number) {
   return Math.ceil(n / step) * step;
 }
 
+// A limit that spends `cut` (0.25 = 25%) less than the typical month,
+// rounded the same easy-to-remember way. Never above the typical month.
+export const CUTS = [0, 0.1, 0.25, 0.5] as const;
+export function limitWithCut(typical: number, cut: number) {
+  if (cut <= 0) return roundUp(Math.max(typical, 1));
+  const target = typical * (1 - cut);
+  const step = target < 100 ? 5 : target < 500 ? 10 : 25;
+  return Math.max(step, Math.round(target / step) * step);
+}
+
 // Only everyday spending (groceries, food, shopping, gas...) gets a budget:
 // bills and EMIs are fixed, and savings and transfers aren't spending. The
 // limit is the typical (median) month, so one unusual month doesn't set it.
