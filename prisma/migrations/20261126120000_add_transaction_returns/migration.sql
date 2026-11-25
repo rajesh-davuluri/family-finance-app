@@ -1,0 +1,23 @@
+BEGIN TRY
+
+BEGIN TRAN;
+
+-- AlterTable
+ALTER TABLE [dbo].[Transaction] ADD [refundTxnId] NVARCHAR(100),
+[returnBy] DATETIME2,
+[returnExpected] DECIMAL(12,2),
+[returnSentOn] DATETIME2,
+[returnState] NVARCHAR(20);
+
+COMMIT TRAN;
+
+END TRY
+BEGIN CATCH
+
+IF @@TRANCOUNT > 0
+BEGIN
+    ROLLBACK TRAN;
+END;
+THROW
+
+END CATCH

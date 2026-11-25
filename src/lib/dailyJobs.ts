@@ -8,6 +8,7 @@ import { budgetAlert } from "@/lib/budgets";
 import { toApproxUsd } from "@/lib/fx";
 import { kindOf } from "@/lib/categoryKind";
 import { summariesDue, summaryText } from "@/lib/moneySummary";
+import { LATE_DAYS, md } from "@/lib/returns";
 
 // The daily jobs. vercel.json runs them all in one call (/api/cron/daily) so
 // the serverless database wakes once a day, not once per job: each wake keeps
@@ -122,7 +123,32 @@ export async function sendReminders() {
 
   const cardReminders = await remindCards(today);
   const budgetAlerts = await remindBudgets(today);
-  return { checked: due.length, reminders, cardReminders, budgetAlerts };
+  const returnReminders = await remindReturns(today);
+  return { checked: due.length, reminders, cardReminders, budgetAlerts, returnReminders };
+}
+
+// Returns: 3 days and 1 day before a return window closes, and once when a
+// refund is LATE_DAYS overdue. Exact days, so each is sent once.
+async function remindReturns(today: string) {
+  const at = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000);
+  const name = (t: { notes: string | null; category: { name: string } }) => t.notes?.trim() || t.category.name;
+  const closing = await prisma.transaction.findMany({
+    where: { returnState: null, returnBy: { in: [at(3), at(1)] } },
+    select: { householdId: true, notes: true, returnBy: true, category: { select: { name: true } } },
+  });
+  for (const t of closing) {
+    const left = Math.round((t.returnBy!.getTime() - at(0).getTime()) / 86_400_000);
+    await tell(t.householdId, `Last chance to return ${name(t)}: ${left === 1 ? "tomorrow is the last day" : `by ${md(t.returnBy!.toISOString().slice(0, 10))} (${left} days)`}.`, "↩️");
+  }
+  const late = await prisma.transaction.findMany({
+    where: { returnState: "RETURNING", refundTxnId: null, returnSentOn: at(-LATE_DAYS) },
+    select: { householdId: true, notes: true, currency: true, amount: true, returnExpected: true, category: { select: { name: true } } },
+  });
+  for (const t of late) {
+    const expected = Number(t.returnExpected ?? t.amount);
+    await tell(t.householdId, `${name(t)}: the ${t.currency === "USD" ? "$" : `${t.currency} `}${expected.toFixed(2)} refund hasn't arrived, ${LATE_DAYS} days after sending it back. Worth chasing the store.`, "↩️");
+  }
+  return closing.length + late.length;
 }
 
 async function tell(householdId: string, message: string, icon: string) {

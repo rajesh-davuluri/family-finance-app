@@ -10,6 +10,7 @@ import { SOURCE_LABELS, sourceOf } from "@/lib/lastActivity";
 import { money } from "@/lib/money";
 import { caretToEnd, formatAmountInput, parseAmount } from "@/lib/amountInput";
 import { RecentActivity } from "@/components/AccountActivity";
+import ReturnsPanel from "@/components/ReturnsPanel";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
@@ -30,6 +31,8 @@ type Transaction = {
   attachment?: { id: string } | null;
   loanContact?: { name: string } | null;
   rewardsAmount?: string | number | null;
+  returnBy?: string | null;
+  returnState?: string | null;
   splitGroupId?: string | null;
 };
 
@@ -198,6 +201,8 @@ export default function TransactionsPage() {
       hasPhoto: !!t.attachment,
       loanPerson: t.loanContact?.name ?? null,
       rewardsAmount: t.rewardsAmount == null ? null : Number(t.rewardsAmount),
+      returnBy: t.returnBy ? t.returnBy.slice(0, 10) : null,
+      returnState: t.returnState ?? null,
       loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
       ...(t.splitGroupId
         ? (() => {
@@ -366,6 +371,8 @@ export default function TransactionsPage() {
           </div>
         )}
       </form>
+
+      <ReturnsPanel today={getTodayLocal()} onEdit={setEditingTransaction} />
 
       {/* Search criteria */}
       <div className="rounded-lg border bg-white p-3 sm:p-4">
