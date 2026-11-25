@@ -119,9 +119,14 @@ export default function PlanPage() {
               ? `About ${usd(p.perDay)} a day for the ${p.daysToPayday} day${p.daysToPayday === 1 ? "" : "s"} to payday.`
               : "Bank cash less everything due in the next 30 days."}
         </p>
+        {p.keptForLater && (
+          <p className="mt-1 text-sm text-amber-200">
+            {usd(p.keptForLater.usd)} is held back: after payday, {p.keptForLater.causes.map((c) => `${c.label} (${usd(c.paid)}, ${short(c.date)})`).join(", ")} would take cash under your cushion by {short(p.keptForLater.lowDate)}. Spend it now and the paycheck won&apos;t cover them.
+          </p>
+        )}
         <details className="mt-3 border-t border-white/15 pt-2 text-sm">
           <summary className="cursor-pointer text-ink-300">
-            {usd(data.cashUsd)} in the bank − {usd(p.committed)} due before payday{p.held > 0 ? ` − ${usd(p.held)} set aside for the year ahead` : ""}{p.whatIfNow > 0 ? ` − ${usd(p.whatIfNow)} what if` : ""}
+            {usd(data.cashUsd)} in the bank − {usd(p.committed)} due before payday{p.held > 0 ? ` − ${usd(p.held)} set aside for the year ahead` : ""}{p.whatIfNow > 0 ? ` − ${usd(p.whatIfNow)} what if` : ""}{p.keptForLater ? ` − ${usd(p.keptForLater.usd)} kept for bills after payday` : ""}
           </summary>
           <ul className="mt-2 space-y-1">
             {p.dueBeforePayday.length === 0 && <li className="text-ink-300">Nothing due before payday.</li>}
