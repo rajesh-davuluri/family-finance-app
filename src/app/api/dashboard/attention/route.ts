@@ -14,6 +14,8 @@ import { loadCardCheckStatuses } from "@/lib/cardCheckData";
 import { loadCloseOverview } from "@/lib/periodCloseData";
 import { loadPeople } from "@/lib/personalLoanData";
 import { loadSubscriptions } from "@/lib/subscriptionData";
+import { loadReturns } from "@/lib/returnsData";
+import { returnText } from "@/lib/returns";
 import { alertText } from "@/lib/subscriptions";
 import { money } from "@/lib/money";
 import { REMIND_AFTER_DAYS, daysSince } from "@/lib/personalLoans";
@@ -131,6 +133,14 @@ export async function GET() {
   const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   // A failure here (the subscriptions table not migrated yet) mustn't take
   // down the rest of Needs attention.
+  // Returns worth a look: a refund late or short (in the last 30 days), a
+  // return window about to close.
+  const recent = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
+  const returnOrder = ["LATE", "SHORT", "WINDOW_SOON"];
+  const returnAlerts = (await loadReturns(householdId, today).catch(() => ({ items: [] as Awaited<ReturnType<typeof loadReturns>>["items"] }))).items
+    .filter((i) => i.status && (i.status.kind === "LATE" || i.status.kind === "WINDOW_SOON" || (i.status.kind === "SHORT" && i.status.on >= recent)))
+    .sort((a, b) => returnOrder.indexOf(a.status!.kind) - returnOrder.indexOf(b.status!.kind))
+    .map((i) => returnText(i.name, i.status!, (n) => money(n, i.currency)));
   const subscriptionAlerts = (await loadSubscriptions(householdId, today).catch(() => []))
     .flatMap((s) => s.alerts.filter((a) => a.kind !== "PRICE_DOWN").map((a) => ({ s, a })))
     .sort((x, y) => ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(x.a.kind) - ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(y.a.kind))
@@ -162,6 +172,7 @@ export async function GET() {
     closes,
     owedToYou,
     subscriptionAlerts,
+    returnAlerts,
   });
   return NextResponse.json({ items });
 }

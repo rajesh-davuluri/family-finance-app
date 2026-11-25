@@ -333,6 +333,15 @@ model Transaction {
   // statement); amount + rewardsAmount is the full price.
   rewardsAmount Decimal? @db.Decimal(12, 2)
 
+  // Returns (src/lib/returns.ts). returnBy: the last day the store takes it
+  // back. returnState: RETURNING (sent back, refund awaited) | REFUNDED
+  // (paired with its refund, refundTxnId) | KEPT (decided not to return).
+  returnBy       DateTime?
+  returnState    String?   @db.NVarChar(20)
+  returnSentOn   DateTime?
+  returnExpected Decimal?  @db.Decimal(12, 2)
+  refundTxnId    String?   @db.NVarChar(100)
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])

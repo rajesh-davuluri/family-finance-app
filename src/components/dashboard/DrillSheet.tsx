@@ -28,6 +28,8 @@ type Txn = {
   attachment?: { id: string } | null;
   loanContact?: { name: string } | null;
   rewardsAmount?: string | number | null;
+  returnBy?: string | null;
+  returnState?: string | null;
   splitGroupId?: string | null;
 };
 
@@ -188,6 +190,8 @@ function TransactionList({ drill, onEdit }: { drill: Extract<Drill, { kind: "tra
                     hasPhoto: !!t.attachment,
                     loanPerson: t.loanContact?.name ?? null,
                     rewardsAmount: t.rewardsAmount == null ? null : Number(t.rewardsAmount),
+                    returnBy: t.returnBy ? t.returnBy.slice(0, 10) : null,
+                    returnState: t.returnState ?? null,
                     loanWay: t.category.direction === "INCOME" ? "IN" : "OUT",
                   })
                 }

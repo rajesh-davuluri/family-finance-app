@@ -9,6 +9,8 @@ import { amountToInput, caretToEnd, formatAmountInput, parseAmount } from "@/lib
 import { categoryHint, type ReceiptGuess } from "@/lib/receiptParse";
 import { parseReceiptItems, type ReceiptItem } from "@/lib/receiptItems";
 import SplitEditor, { type SplitValue } from "@/components/SplitEditor";
+import ReturnPanel from "@/components/ReturnPanel";
+import { TRANSACTIONS_CHANGED } from "@/lib/events";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; currency: string; archived: boolean };
@@ -58,6 +60,9 @@ export type EditableTransaction = {
   loanWay?: "IN" | "OUT";
   // Part of the price paid with card rewards / cashback.
   rewardsAmount?: number | null;
+  // Returns (src/lib/returns.ts).
+  returnBy?: string | null;
+  returnState?: string | null;
 };
 
 const SCAN_STAGE: Record<string, string> = {
@@ -121,6 +126,9 @@ export default function AddTransactionModal({
   // Paid part of the price with card rewards or cashback: how much.
   const [rewardsOpen, setRewardsOpen] = useState(false);
   const [rewards, setRewards] = useState("");
+  // A new purchase's return window (optional).
+  const [returnByOpen, setReturnByOpen] = useState(false);
+  const [returnBy, setReturnBy] = useState("");
   const pickFor = useRef<"attach" | "split">("attach");
 
   async function showItems(text: string) {
@@ -292,6 +300,8 @@ export default function AddTransactionModal({
     setPhone("");
     const r = editingTransaction?.rewardsAmount ?? 0;
     setRewards(amountToInput(r, editingTransaction?.currency));
+    setReturnByOpen(false);
+    setReturnBy("");
     setRewardsOpen(r > 0);
     if (linked && people === null)
       fetch("/api/lent/names")
@@ -401,6 +411,7 @@ export default function AddTransactionModal({
         ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
         // Paid with rewards on top of the amount charged (0 clears it).
         ...(isExpense && rewardsOpen ? { rewardsAmount: parseAmount(rewards) || 0 } : isEditing && (editingTransaction?.rewardsAmount ?? 0) > 0 ? { rewardsAmount: 0 } : {}),
+        ...(!isEditing && isExpense && returnBy ? { returnBy } : {}),
         // Was money with a person, now spending or income: unlink them.
         ...(isEditing && editingTransaction?.loanPerson ? { loanContactId: null } : {}),
       }),
@@ -424,6 +435,8 @@ export default function AddTransactionModal({
     if (!isEditing) {
       setRewards("");
       setRewardsOpen(false);
+      setReturnBy("");
+      setReturnByOpen(false);
     }
     setNewPhoto(null);
     setScanNote(null);
@@ -812,6 +825,34 @@ export default function AddTransactionModal({
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 className="rounded-md border px-3 py-2 text-sm"
               />
+              {!isEditing && !loanType && !splitOn && isExpense && (
+                <div className="sm:col-span-2">
+                  {!returnByOpen ? (
+                    <button type="button" onClick={() => setReturnByOpen(true)} className="text-xs font-medium text-brand-700 hover:underline">
+                      + Might return it? Set a return-by date
+                    </button>
+                  ) : (
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      Return by
+                      <input type="date" value={returnBy} onChange={(e) => setReturnBy(e.target.value)} className="rounded-md border px-2 py-1 text-sm" />
+                      <span className="text-xs text-gray-500">you&apos;ll be reminded before it closes</span>
+                    </label>
+                  )}
+                </div>
+              )}
+              {isEditing && !loanType && !splitOn && isExpense && (
+                <ReturnPanel
+                  tx={{
+                    id: editingTransaction!.id,
+                    amount: Number(editingTransaction!.amount),
+                    currency: editingTransaction!.currency,
+                    name: editingTransaction!.notes ?? "",
+                    returnBy: editingTransaction!.returnBy ?? null,
+                    returnState: editingTransaction!.returnState ?? null,
+                  }}
+                  onChanged={() => window.dispatchEvent(new Event(TRANSACTIONS_CHANGED))}
+                />
+              )}
               {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
               {duplicate && (
                 <div
