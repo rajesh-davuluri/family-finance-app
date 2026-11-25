@@ -8,6 +8,7 @@ import DuplicateReview from "@/components/DuplicateReview";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { SOURCE_LABELS, sourceOf } from "@/lib/lastActivity";
 import { money } from "@/lib/money";
+import { caretToEnd, formatAmountInput, parseAmount } from "@/lib/amountInput";
 import { RecentActivity } from "@/components/AccountActivity";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 
@@ -150,13 +151,17 @@ export default function TransactionsPage() {
       setError("Add a category and a payment instrument first (see the Categories / Instruments pages).");
       return;
     }
+    if (!(parseAmount(form.amount) > 0)) {
+      setError("Enter the amount.");
+      return;
+    }
     setSubmitting(true);
     const res = await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        amount: parseFloat(form.amount),
+        amount: parseAmount(form.amount),
         ...(allowDuplicate ? { allowDuplicate: true } : {}),
       }),
     });
@@ -267,18 +272,21 @@ export default function TransactionsPage() {
       {/* On a phone the bottom bar's ＋ adds a transaction; this inline form is for wider screens. */}
       <form onSubmit={handleSubmit} className="hidden grid-cols-1 gap-3 rounded-lg border bg-white p-4 lg:grid lg:grid-cols-6">
         <input
-          type="number"
-          step="0.01"
-          min="0.01"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
           required
-          placeholder="Amount"
+          placeholder="Amount 0.00"
+          aria-label="Amount"
+          onFocus={caretToEnd}
+          onClick={caretToEnd}
           value={form.amount}
-          onChange={(e) => setForm({ ...form, amount: e.target.value })}
+          onChange={(e) => setForm({ ...form, amount: formatAmountInput(e.target.value, form.currency) })}
           className="rounded-md border px-3 py-2 text-sm sm:col-span-1"
         />
         <select
           value={form.currency}
-          onChange={(e) => setForm({ ...form, currency: e.target.value })}
+          onChange={(e) => setForm({ ...form, currency: e.target.value, amount: formatAmountInput(form.amount, e.target.value) })}
           className="rounded-md border px-3 py-2 text-sm sm:col-span-1"
         >
           {CURRENCIES.map((c) => (
