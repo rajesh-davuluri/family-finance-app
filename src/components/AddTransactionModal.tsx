@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { money } from "@/lib/money";
+import { amountToInput, caretToEnd, formatAmountInput, parseAmount } from "@/lib/amountInput";
 import { categoryHint, type ReceiptGuess } from "@/lib/receiptParse";
 import { parseReceiptItems, type ReceiptItem } from "@/lib/receiptItems";
 import SplitEditor, { type SplitValue } from "@/components/SplitEditor";
@@ -55,6 +56,8 @@ export type EditableTransaction = {
   // Money with a person (Lent & borrowed): who, and which way it went.
   loanPerson?: string | null;
   loanWay?: "IN" | "OUT";
+  // Part of the price paid with card rewards / cashback.
+  rewardsAmount?: number | null;
 };
 
 const SCAN_STAGE: Record<string, string> = {
@@ -115,6 +118,9 @@ export default function AddTransactionModal({
   const [person, setPerson] = useState("");
   const [phone, setPhone] = useState("");
   const [people, setPeople] = useState<{ id: string; name: string }[] | null>(null);
+  // Paid part of the price with card rewards or cashback: how much.
+  const [rewardsOpen, setRewardsOpen] = useState(false);
+  const [rewards, setRewards] = useState("");
   const pickFor = useRef<"attach" | "split">("attach");
 
   async function showItems(text: string) {
@@ -200,7 +206,7 @@ export default function AddTransactionModal({
 
   async function applyGuess(g: ReceiptGuess, text: string) {
     const next = { ...form };
-    if (g.amount != null) next.amount = g.amount.toFixed(2);
+    if (g.amount != null) next.amount = amountToInput(g.amount, next.currency);
     if (g.date) next.date = g.date;
     if (g.merchant && !next.notes) next.notes = g.merchant;
     // Rupees on the bill: pay from a rupee account if there is one.
@@ -284,6 +290,9 @@ export default function AddTransactionModal({
     );
     setPerson(linked ?? "");
     setPhone("");
+    const r = editingTransaction?.rewardsAmount ?? 0;
+    setRewards(amountToInput(r, editingTransaction?.currency));
+    setRewardsOpen(r > 0);
     if (linked && people === null)
       fetch("/api/lent/names")
         .then((r) => (r.ok ? r.json() : { people: [] }))
@@ -297,7 +306,7 @@ export default function AddTransactionModal({
       setInstruments(insts);
       if (editingTransaction) {
         setForm({
-          amount: String(editingTransaction.amount),
+          amount: amountToInput(editingTransaction.amount, editingTransaction.currency),
           currency: editingTransaction.currency,
           date: editingTransaction.date.slice(0, 10),
           notes: editingTransaction.notes ?? "",
@@ -341,7 +350,7 @@ export default function AddTransactionModal({
         type: loanType,
         person: person.trim(),
         ...(phone.trim() ? { phone: phone.trim() } : {}),
-        amount: parseFloat(form.amount),
+        amount: parseAmount(form.amount),
         instrumentId: form.instrumentId,
         date: form.date,
         ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
@@ -361,6 +370,10 @@ export default function AddTransactionModal({
 
   async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
+    if (!(parseAmount(form.amount) > 0)) {
+      setError("Enter the amount.");
+      return;
+    }
     if (loanType) return submitLoan();
     // "Add anyway" after the warning: the transaction it looked like.
     const notDuplicateOf = allowDuplicate ? duplicate?.id : undefined;
@@ -384,8 +397,10 @@ export default function AddTransactionModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        amount: parseFloat(form.amount),
+        amount: parseAmount(form.amount),
         ...(allowDuplicate ? { allowDuplicate: true, notDuplicateOf } : {}),
+        // Paid with rewards on top of the amount charged (0 clears it).
+        ...(isExpense && rewardsOpen ? { rewardsAmount: parseAmount(rewards) || 0 } : isEditing && (editingTransaction?.rewardsAmount ?? 0) > 0 ? { rewardsAmount: 0 } : {}),
         // Was money with a person, now spending or income: unlink them.
         ...(isEditing && editingTransaction?.loanPerson ? { loanContactId: null } : {}),
       }),
@@ -406,6 +421,10 @@ export default function AddTransactionModal({
     const photoError = saved?.id ? await savePhoto(saved.id) : null;
     if (photoError) window.alert(`The transaction was saved, but ${photoError}. Open it and attach the photo again.`);
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
+    if (!isEditing) {
+      setRewards("");
+      setRewardsOpen(false);
+    }
     setNewPhoto(null);
     setScanNote(null);
     setDuplicate(null);
@@ -419,7 +438,7 @@ export default function AddTransactionModal({
       const patch = await fetch(`/api/transactions/${editingTransaction!.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, amount: parseFloat(form.amount) }),
+        body: JSON.stringify({ ...form, amount: parseAmount(form.amount) }),
       });
       if (!patch.ok) {
         setSubmitting(false);
@@ -462,7 +481,7 @@ export default function AddTransactionModal({
 
   const splitOn = !!split?.enabled && split.parts.length > 0;
   const isExpense = categories.find((c) => c.id === form.categoryId)?.direction !== "INCOME";
-  const splitTotal = isEditing ? editingTransaction?.splitTotal ?? Number(editingTransaction?.amount ?? 0) : parseFloat(form.amount) || 0;
+  const splitTotal = isEditing ? editingTransaction?.splitTotal ?? Number(editingTransaction?.amount ?? 0) : parseAmount(form.amount) || 0;
 
   const noSetupYet = !loading && (categories.length === 0 || instruments.length === 0);
 
@@ -638,22 +657,26 @@ export default function AddTransactionModal({
             )}
             <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
-                type="number"
+                type="text"
                 inputMode="decimal"
-                step="0.01"
-                min="0.01"
+                autoComplete="off"
                 required
                 // Straight to the amount with a keyboard; on a touch screen the keyboard would cover the Scan button.
                 autoFocus={!isEditing && typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches}
-                placeholder="Amount"
+                placeholder="0.00"
                 aria-label="Amount"
+                onFocus={caretToEnd}
+                onClick={caretToEnd}
                 value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                onChange={(e) => setForm({ ...form, amount: formatAmountInput(e.target.value, form.currency) })}
                 className="rounded-md border px-3 py-3 text-2xl font-semibold tabular-nums sm:py-2 sm:text-sm sm:font-normal"
               />
               <select
                 value={form.currency}
-                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, currency: e.target.value, amount: formatAmountInput(form.amount, e.target.value) });
+                  setRewards((r) => formatAmountInput(r, e.target.value));
+                }}
                 className="rounded-md border px-3 py-2 text-sm"
               >
                 {CURRENCIES.map((c) => (
@@ -662,6 +685,50 @@ export default function AddTransactionModal({
                   </option>
                 ))}
               </select>
+              {!loanType && !splitOn && isExpense && (
+                <div className="sm:col-span-2">
+                  {!rewardsOpen ? (
+                    <button type="button" onClick={() => setRewardsOpen(true)} className="text-xs font-medium text-brand-700 hover:underline">
+                      + Paid part with rewards or cashback?
+                    </button>
+                  ) : (
+                    <div className="rounded-md border border-dashed p-2.5">
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="rewards" className="text-sm text-gray-700">
+                          Paid with rewards / cashback
+                        </label>
+                        <input
+                          id="rewards"
+                          type="text"
+                          inputMode="decimal"
+                          autoComplete="off"
+                          placeholder="0.00"
+                          onFocus={caretToEnd}
+                          onClick={caretToEnd}
+                          value={rewards}
+                          onChange={(e) => setRewards(formatAmountInput(e.target.value, form.currency))}
+                          className="w-28 rounded-md border px-2 py-1.5 text-sm tabular-nums"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRewardsOpen(false);
+                            setRewards("");
+                          }}
+                          className="ml-auto text-xs text-gray-500 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {parseAmount(rewards) > 0 && parseAmount(form.amount) > 0
+                          ? `Full price ${money(parseAmount(form.amount) + parseAmount(rewards), form.currency)}: card charged ${money(parseAmount(form.amount), form.currency)} + ${money(parseAmount(rewards), form.currency)} rewards.`
+                          : "Amount above = what the card was charged (as on the statement). Rewards = the part paid with points or cashback."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
               {splitOn && (
                 <p className="rounded-md border border-dashed px-3 py-2 text-sm text-gray-600 sm:col-span-2">
                   Category: split across {split!.parts.length} (above)
@@ -715,7 +782,9 @@ export default function AddTransactionModal({
                 onChange={(e) => {
                   // A rupee account means rupees: follow the account's currency.
                   const inst = instruments.find((i) => i.id === e.target.value);
-                  setForm({ ...form, instrumentId: e.target.value, currency: inst?.currency ?? form.currency });
+                  const currency = inst?.currency ?? form.currency;
+                  setForm({ ...form, instrumentId: e.target.value, currency, amount: formatAmountInput(form.amount, currency) });
+                  setRewards((r) => formatAmountInput(r, currency));
                 }}
                 className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${form.instrumentId ? "" : "text-gray-500"}`}
               >

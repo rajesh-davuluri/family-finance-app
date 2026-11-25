@@ -27,6 +27,8 @@ export type ReportTransaction = {
   instrumentName: string;
   source: string;
   createdByName: string;
+  // Paid with card rewards / cashback on top of `usd` (approx USD).
+  rewardsUsd?: number;
 };
 
 export type CardCheck = {
@@ -119,6 +121,8 @@ export function spendingSummary(txns: ReportTransaction[], from: string, to: str
     saved,
     refunds,
     notCounted: { count: notCounted.length, usd: round(notCounted.reduce((s, t) => s + t.usd, 0)) },
+    // Paid with card rewards / cashback (on top of what was spent).
+    rewardsUsed: round(purchases.reduce((s, t) => s + (t.rewardsUsd ?? 0), 0)),
     expenseCount: purchases.length,
     incomeCount: income.length,
     days: daysBetween(from, to),

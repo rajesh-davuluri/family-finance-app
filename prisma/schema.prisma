@@ -328,6 +328,11 @@ model Transaction {
   loanContactId String?
   loanContact   LoanContact? @relation(fields: [loanContactId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // Part of the price paid with card rewards or cashback at checkout. The
+  // amount above is what the card or account was charged (as on the
+  // statement); amount + rewardsAmount is the full price.
+  rewardsAmount Decimal? @db.Decimal(12, 2)
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])

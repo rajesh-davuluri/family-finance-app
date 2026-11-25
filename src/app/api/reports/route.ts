@@ -68,6 +68,7 @@ export async function GET(req: Request) {
     instrumentName: t.instrument.name,
     source: sourceOf(t),
     createdByName: t.createdBy.name,
+    ...(t.rewardsAmount ? { rewardsUsd: Math.round(toApproxUsd(Number(t.rewardsAmount), t.currency) * 100) / 100 } : {}),
   }));
 
   // Card check, in each card's own currency.
