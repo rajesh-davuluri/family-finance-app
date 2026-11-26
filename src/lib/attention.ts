@@ -9,7 +9,7 @@ export type AttentionItem = { key: string; level: "high" | "medium"; rank: numbe
 
 // Money about to go short first, then bills, then the books being wrong,
 // then habits and housekeeping.
-export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, returns: 3.5, subscriptions: 5.5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
+export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, fees: 3.2, returns: 3.5, subscriptions: 5.5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
 // How many lines the dashboard shows before "Show more".
 export const ATTENTION_SHOWN = 4;
 
@@ -88,6 +88,9 @@ export function attentionItems(input: {
   // Subscriptions (src/lib/subscriptions.ts): price rises, double charges,
   // new ones and charges after a Cancel, most pressing first.
   subscriptionAlerts?: string[];
+  // Fees & interest (src/lib/fees.ts): new ones and interest month after
+  // month, most pressing first.
+  feeAlerts?: string[];
   // Returns (src/lib/returns.ts): refunds late or short, windows closing.
   returnAlerts?: string[];
   // Lent & borrowed: people who have owed you a while (src/lib/personalLoans.ts).
@@ -181,6 +184,12 @@ export function attentionItems(input: {
   if (cats.length) {
     const rest = cats.length - 1;
     items.push({ ...cats[0], key: "categories", text: `${cats[0].text}${rest ? ` · ${rest} more ${rest === 1 ? "category" : "categories"} running high` : ""}` });
+  }
+
+  const feeLines = input.feeAlerts ?? [];
+  if (feeLines.length) {
+    const rest = feeLines.length - 1;
+    items.push({ key: "fees", level: "medium", rank: RANK.fees, text: `${feeLines[0]}${rest ? ` · ${rest} more fee${rest === 1 ? "" : "s"}` : ""}`, href: "/reports" });
   }
 
   const rets = input.returnAlerts ?? [];
