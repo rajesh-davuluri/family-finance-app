@@ -15,6 +15,8 @@ import { loadCloseOverview } from "@/lib/periodCloseData";
 import { loadPeople } from "@/lib/personalLoanData";
 import { loadSubscriptions } from "@/lib/subscriptionData";
 import { loadReturns } from "@/lib/returnsData";
+import { loadRecentFees } from "@/lib/feesData";
+import { FEE_ADVICE, feeAlertText, interestStreaks } from "@/lib/fees";
 import { returnText } from "@/lib/returns";
 import { alertText } from "@/lib/subscriptions";
 import { money } from "@/lib/money";
@@ -133,6 +135,19 @@ export async function GET() {
   const short = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
   // A failure here (the subscriptions table not migrated yet) mustn't take
   // down the rest of Needs attention.
+  // Fees & interest: interest charged month after month on a card, and any
+  // fee in the last two weeks not reversed -- the ones you can act on first.
+  const fees = await loadRecentFees(householdId, today).catch(() => []);
+  const twoWeeks = new Date(Date.parse(`${today}T00:00:00Z`) - 14 * 86_400_000).toISOString().slice(0, 10);
+  const feeOrder = ["LATE_FEE", "OVERDRAFT", "RETURNED_PAYMENT", "INTEREST", "CASH_ADVANCE_FEE", "ANNUAL_FEE", "SERVICE_FEE", "FX_FEE", "ATM_FEE"];
+  const streaks = interestStreaks(fees).filter((s) => s.latest === thisMonth || s.latest === lastMonth);
+  const feeAlerts = [
+    ...streaks.map((s) => `Interest charged on ${s.account} ${s.months} months in a row: ${FEE_ADVICE.INTEREST}`),
+    ...fees
+      .filter((f) => !f.waivedBy && f.date >= twoWeeks && !(f.feeKind === "INTEREST" && streaks.some((s) => s.account === f.instrumentName)))
+      .sort((a, b) => feeOrder.indexOf(a.feeKind) - feeOrder.indexOf(b.feeKind) || b.date.localeCompare(a.date))
+      .map((f) => feeAlertText(f, (n) => money(n, f.currency))),
+  ];
   // Returns worth a look: a refund late or short (in the last 30 days), a
   // return window about to close.
   const recent = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10);
@@ -173,6 +188,7 @@ export async function GET() {
     owedToYou,
     subscriptionAlerts,
     returnAlerts,
+    feeAlerts,
   });
   return NextResponse.json({ items });
 }

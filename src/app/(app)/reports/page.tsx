@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import { FEE_ADVICE, FEE_LABELS, feeTotals, findFees, interestStreaks } from "@/lib/fees";
 import { SOURCE_LABELS, TransactionSource } from "@/lib/lastActivity";
 import { GROUP_LABELS } from "@/lib/categoryGroups";
 import {
@@ -349,6 +350,7 @@ export default function ReportsPage() {
             </p>
           )}
           {tab === "summary" && <SummaryView summary={summary} />}
+          {tab === "summary" && <FeesPanel txns={txns} />}
           {tab === "transactions" && (
             <TransactionsView
               listed={listed}
@@ -724,5 +726,77 @@ function CardsView({ cards, periodLabel }: { cards: CardCheck[]; periodLabel: st
         ))}
       </div>
     </div>
+  );
+}
+
+// Fees & interest in the period (src/lib/fees.ts): what was lost, by type and
+// card, each fee (waived ones ticked), and interest charged month after month.
+function FeesPanel({ txns }: { txns: Parameters<typeof spendingSummary>[0] }) {
+  const fees = useMemo(() => findFees(txns), [txns]);
+  if (!fees.length) {
+    return <p className="rounded-lg border bg-white p-4 text-sm text-income-600 print:break-inside-avoid">✓ No fees or interest charged in this period.</p>;
+  }
+  const t = feeTotals(fees);
+  const streaks = interestStreaks(fees);
+  return (
+    <Panel title="Fees & interest" note="money lost; approximate USD">
+      <p className="text-sm">
+        <span className="text-2xl font-semibold tabular-nums text-expense-600">{usd(t.totalUsd)}</span>{" "}
+        <span className="text-gray-500">
+          lost to {t.count} fee{t.count === 1 ? "" : "s"} and interest charge{t.count === 1 ? "" : "s"}
+          {t.waived > 0 && <> · {usd(t.waivedUsd)} waived ✓</>}
+        </span>
+      </p>
+      {streaks.map((s) => (
+        <p key={s.account} className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-expense-600">
+          Interest on {s.account} {s.months} months in a row: {FEE_ADVICE.INTEREST}.
+        </p>
+      ))}
+      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">By type</p>
+          <ul className="space-y-1 text-sm">
+            {t.byKind.map((k) => (
+              <li key={k.key} className="flex justify-between gap-3">
+                <span>{k.label}</span>
+                <span className="tabular-nums">{usd(k.usd)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">By card / account</p>
+          <ul className="space-y-1 text-sm">
+            {t.byAccount.map((a) => (
+              <li key={a.key} className="flex justify-between gap-3">
+                <span className="truncate">{a.key}</span>
+                <span className="tabular-nums">{usd(a.usd)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <details className="mt-3 text-sm">
+        <summary className="cursor-pointer text-gray-600">Each fee ({fees.length})</summary>
+        <ul className="mt-2 divide-y">
+          {[...fees].reverse().map((f) => (
+            <li key={f.id} className="flex items-start justify-between gap-3 py-1.5">
+              <span className="min-w-0">
+                <span className="block">
+                  {FEE_LABELS[f.feeKind]} · {f.instrumentName}
+                </span>
+                <span className="block truncate text-xs text-gray-500">
+                  {formatDate(f.date)} · {f.notes ?? f.categoryName}
+                </span>
+              </span>
+              <span className={`shrink-0 text-right tabular-nums ${f.waivedBy ? "text-gray-400 line-through" : ""}`}>
+                {money(f.amount, f.currency)}
+                {f.waivedBy && <span className="block text-xs text-income-600 no-underline">waived ✓</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </Panel>
   );
 }
