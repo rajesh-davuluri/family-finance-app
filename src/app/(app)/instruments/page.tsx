@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { AccountFreshness } from "@/components/AccountActivity";
+import Link from "next/link";
+import { money } from "@/lib/money";
+import AccountDetailsPanel from "@/components/AccountDetailsPanel";
+import BalanceBreakdown from "@/components/BalanceBreakdown";
+import BalanceCheckPanel, { CheckBadge, type LastCheck } from "@/components/BalanceCheckPanel";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+
+type CardOwed = { hasCycle: boolean; owed: number | null; left: number; status: string | null; due: string | null };
 
 type Instrument = {
   id: string;
@@ -14,6 +22,12 @@ type Instrument = {
   openingBalance: string | null;
   openingBalanceDate: string | null;
   currentBalance: number | null;
+  // The last check against the bank's own balance, re-tested now.
+  lastCheck?: LastCheck | null;
+  // True when a credit card has no starting balance and currentBalance is
+  // just the sum of its transactions and transfers in the app.
+  balanceFromTransactionsOnly: boolean;
+  creditLimit: string | null;
 };
 
 type Transfer = {
@@ -34,15 +48,24 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export default function InstrumentsPage() {
+  const [showAdd, setShowAdd] = useState(false);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  // Credit cards: what's owed, from their statements (the Credit cards page).
+  const [cardOwed, setCardOwed] = useState<Map<string, CardOwed>>(new Map());
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD" });
+  const [form, setForm] = useState({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD", creditLimit: "" });
   const [submitting, setSubmitting] = useState(false);
 
   // Which instrument's balance is currently being edited, if any.
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
+  // An account whose balance breakdown is open.
+  const [howId, setHowId] = useState<string | null>(null);
+  // An account being checked against the bank.
+  const [checkId, setCheckId] = useState<string | null>(null);
+  // Which instrument's details (bank, IFSC, account number...) are open.
+  const [detailsId, setDetailsId] = useState<string | null>(null);
   const [balanceForm, setBalanceForm] = useState({ amount: "", date: getTodayLocal() });
 
   // Transfer form -- moves money between two of your own instruments
@@ -57,20 +80,38 @@ export default function InstrumentsPage() {
     notes: "",
   });
   const [transferSubmitting, setTransferSubmitting] = useState(false);
+  // A transfer being changed in the form above the list.
+  const [editingTransferId, setEditingTransferId] = useState<string | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    const [instRes, transferRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/transfers")]);
+    const [instRes, transferRes, cardsRes] = await Promise.all([fetch("/api/instruments"), fetch("/api/transfers"), fetch("/api/cards")]);
+    if (cardsRes.ok) {
+      const { cards } = await cardsRes.json();
+      setCardOwed(
+        new Map(
+          (cards as { id: string; snapshot: { hasCycle: boolean; outstanding: number | null; leftOnStatement: number; status: string | null; statement: { dueDate: string } | null } }[]).map((c) => [
+            c.id,
+            { hasCycle: c.snapshot.hasCycle, owed: c.snapshot.outstanding, left: c.snapshot.leftOnStatement, status: c.snapshot.status, due: c.snapshot.statement?.dueDate ?? null },
+          ]),
+        ),
+      );
+    }
     const insts: Instrument[] = await instRes.json();
     setInstruments(insts);
     setTransfers(await transferRes.json());
     setTransferForm((f) => ({
       ...f,
-      fromInstrumentId: f.fromInstrumentId || insts.find((i) => !i.archived)?.id || "",
-      toInstrumentId: f.toInstrumentId || insts.filter((i) => !i.archived)[1]?.id || "",
     }));
     setLoading(false);
+  }
+
+  // After a balance check: fresh balances and check results, without the
+  // page blanking to "Loading..." (which would close the open check).
+  async function refreshInstruments() {
+    const res = await fetch("/api/instruments");
+    if (res.ok) setInstruments(await res.json());
   }
 
   useEffect(() => {
@@ -84,7 +125,10 @@ export default function InstrumentsPage() {
     const res = await fetch("/api/instruments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        creditLimit: form.type === "CREDIT_CARD" && form.creditLimit ? parseFloat(form.creditLimit) : undefined,
+      }),
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -92,7 +136,7 @@ export default function InstrumentsPage() {
       setError(typeof body.error === "string" ? body.error : "Couldn't add that instrument.");
       return;
     }
-    setForm({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD" });
+    setForm({ name: "", type: "BANK_ACCOUNT", last4: "", currency: "USD", creditLimit: "" });
     load();
   }
 
@@ -115,21 +159,26 @@ export default function InstrumentsPage() {
     load();
   }
 
+  // Balances are signed (spending on a card makes it negative), but people
+  // think of a card's balance as the amount they owe -- so for credit cards
+  // the editor takes "amount owed" as a positive number and flips the sign.
   function startEditingBalance(i: Instrument) {
+    const sign = i.type === "CREDIT_CARD" ? -1 : 1;
     setBalanceForm({
-      amount: i.openingBalance ? String(i.openingBalance) : "",
+      amount: i.openingBalance ? String(sign * Number(i.openingBalance)) : "",
       date: i.openingBalanceDate ? i.openingBalanceDate.slice(0, 10) : getTodayLocal(),
     });
     setEditingBalanceId(i.id);
   }
 
-  async function saveBalance(id: string) {
+  async function saveBalance(i: Instrument) {
     const amount = parseFloat(balanceForm.amount);
     if (isNaN(amount)) return;
-    await fetch(`/api/instruments/${id}`, {
+    const sign = i.type === "CREDIT_CARD" ? -1 : 1;
+    await fetch(`/api/instruments/${i.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ openingBalance: amount, openingBalanceDate: balanceForm.date }),
+      body: JSON.stringify({ openingBalance: sign * amount, openingBalanceDate: balanceForm.date }),
     });
     setEditingBalanceId(null);
     load();
@@ -138,13 +187,17 @@ export default function InstrumentsPage() {
   async function handleTransferSubmit(e: React.FormEvent) {
     e.preventDefault();
     setTransferError(null);
+    if (!transferForm.fromInstrumentId || !transferForm.toInstrumentId) {
+      setTransferError("Choose the account the money came from and the one it went to.");
+      return;
+    }
     if (transferForm.fromInstrumentId === transferForm.toInstrumentId) {
       setTransferError("Pick two different instruments.");
       return;
     }
     setTransferSubmitting(true);
-    const res = await fetch("/api/transfers", {
-      method: "POST",
+    const res = await fetch(editingTransferId ? `/api/transfers/${editingTransferId}` : "/api/transfers", {
+      method: editingTransferId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...transferForm, amount: parseFloat(transferForm.amount) }),
     });
@@ -154,8 +207,30 @@ export default function InstrumentsPage() {
       setTransferError(typeof body.error === "string" ? body.error : "Couldn't log that transfer.");
       return;
     }
-    setTransferForm((f) => ({ ...f, amount: "", notes: "" }));
+    // Each transfer starts from a blank choice of accounts.
+    setTransferForm((f) => ({ ...f, fromInstrumentId: "", toInstrumentId: "", amount: "", notes: "", date: editingTransferId ? getTodayLocal() : f.date }));
+    setEditingTransferId(null);
     load();
+  }
+
+  function startEditingTransfer(t: Transfer) {
+    setTransferError(null);
+    setEditingTransferId(t.id);
+    setTransferForm({
+      fromInstrumentId: t.fromInstrument.id,
+      toInstrumentId: t.toInstrument.id,
+      amount: String(Number(t.amount)),
+      currency: t.currency,
+      date: t.date.slice(0, 10),
+      notes: t.notes ?? "",
+    });
+    document.getElementById("transfer-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function cancelEditingTransfer() {
+    setEditingTransferId(null);
+    setTransferError(null);
+    setTransferForm({ fromInstrumentId: "", toInstrumentId: "", amount: "", currency: "USD", date: getTodayLocal(), notes: "" });
   }
 
   async function handleDeleteTransfer(id: string) {
@@ -175,7 +250,13 @@ export default function InstrumentsPage() {
         Bank accounts, credit cards, and cash your household tracks transactions against.
       </p>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-5">
+      <button
+        onClick={() => setShowAdd((v) => !v)}
+        className="w-full rounded-lg border border-dashed bg-white px-4 py-3 text-left text-sm text-brand-700 sm:hidden"
+      >
+        {showAdd ? "Close" : "+ Add an account or card"}
+      </button>
+      <form onSubmit={handleSubmit} className={`${showAdd ? "grid" : "hidden"} grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid sm:grid-cols-5`}>
         <input
           required
           placeholder="Name (e.g. Chase Checking)"
@@ -212,6 +293,17 @@ export default function InstrumentsPage() {
             </option>
           ))}
         </select>
+        {form.type === "CREDIT_CARD" && (
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            placeholder="Credit limit (optional)"
+            value={form.creditLimit}
+            onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
+            className="rounded-md border px-3 py-2 text-sm sm:col-span-5"
+          />
+        )}
         <button
           type="submit"
           disabled={submitting}
@@ -222,8 +314,20 @@ export default function InstrumentsPage() {
         {error && <p className="text-sm text-red-600 sm:col-span-5">{error}</p>}
       </form>
 
-      <div className="rounded-lg border bg-white">
-        <table className="w-full text-sm">
+      {activeInstruments.some((i) => i.type === "CREDIT_CARD") && (
+        <Link href="/cards" className="flex items-center justify-between gap-3 rounded-lg border bg-white p-4 text-sm active:bg-gray-50">
+          <span>
+            <span className="block font-medium">Credit cards</span>
+            <span className="block text-gray-500">Statements, what&apos;s owed, due dates, limits and Mark paid are on the Credit cards page.</span>
+          </span>
+          <span aria-hidden className="text-gray-400">
+            ›
+          </span>
+        </Link>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border bg-white">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b text-left text-gray-500">
               <th className="p-3">Name</th>
@@ -236,7 +340,8 @@ export default function InstrumentsPage() {
           </thead>
           <tbody>
             {instruments.map((i) => (
-              <tr key={i.id} className="border-b last:border-0">
+              <Fragment key={i.id}>
+              <tr className="border-b last:border-0">
                 <td className="p-3">
                   {i.name}
                   {i.last4 && <span className="text-gray-400"> ({i.last4})</span>}
@@ -244,7 +349,9 @@ export default function InstrumentsPage() {
                 <td className="p-3">{TYPE_LABELS[i.type] ?? i.type}</td>
                 <td className="p-3">{i.currency}</td>
                 <td className="p-3">
-                  {editingBalanceId === i.id ? (
+                  {i.type === "CREDIT_CARD" ? (
+                    <CardBalance owed={cardOwed.get(i.id)} currency={i.currency} archived={i.archived} />
+                  ) : editingBalanceId === i.id ? (
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -253,16 +360,16 @@ export default function InstrumentsPage() {
                         value={balanceForm.amount}
                         onChange={(e) => setBalanceForm({ ...balanceForm, amount: e.target.value })}
                         className="w-24 rounded border px-2 py-1 text-xs"
-                        placeholder="Amount"
+                        placeholder={i.type === "CREDIT_CARD" ? "Owed" : "Amount"}
                       />
-                      <span className="text-xs text-gray-400">as of</span>
+                      <span className="text-xs text-gray-400">{i.type === "CREDIT_CARD" ? "owed as of" : "as of"}</span>
                       <input
                         type="date"
                         value={balanceForm.date}
                         onChange={(e) => setBalanceForm({ ...balanceForm, date: e.target.value })}
                         className="rounded border px-2 py-1 text-xs"
                       />
-                      <button onClick={() => saveBalance(i.id)} className="text-xs text-brand-600 hover:underline">
+                      <button onClick={() => saveBalance(i)} className="text-xs text-brand-600 hover:underline">
                         Save
                       </button>
                       <button onClick={() => setEditingBalanceId(null)} className="text-xs text-gray-400 hover:underline">
@@ -272,11 +379,31 @@ export default function InstrumentsPage() {
                   ) : i.currentBalance !== null ? (
                     <button onClick={() => startEditingBalance(i)} className="text-left hover:underline">
                       <span className="font-medium">
-                        {i.currency} {i.currentBalance.toFixed(2)}
+                        {i.type === "CREDIT_CARD"
+                          ? `${i.currentBalance <= 0 ? "Owed" : "Credit"} ${i.currency} ${Math.abs(i.currentBalance).toFixed(2)}`
+                          : `${i.currency} ${i.currentBalance.toFixed(2)}`}
                       </span>
-                      <span className="ml-1 text-xs text-gray-400">(edit)</span>
+                      <span className="ml-1 text-xs text-gray-400">
+                        {i.balanceFromTransactionsOnly ? "(from transactions · set starting balance)" : "(edit)"}
+                      </span>
                     </button>
-                  ) : (
+                  ) : null}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.currentBalance !== null && i.openingBalanceDate && (
+                    <button onClick={() => setHowId(howId === i.id ? null : i.id)} className="ml-2 text-xs text-brand-600 hover:underline">
+                      {howId === i.id ? "hide" : "how?"}
+                    </button>
+                  )}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.currentBalance !== null && i.openingBalanceDate && !i.archived && (
+                    <button onClick={() => setCheckId(checkId === i.id ? null : i.id)} className="ml-2 text-xs text-brand-600 hover:underline">
+                      {checkId === i.id ? "close" : "check"}
+                    </button>
+                  )}
+                  {i.type !== "CREDIT_CARD" && editingBalanceId !== i.id && i.lastCheck && (
+                    <span className="mt-0.5 block">
+                      <CheckBadge check={i.lastCheck} currency={i.currency} onFindWhy={() => setCheckId(i.id)} />
+                    </span>
+                  )}
+                  {i.type === "CREDIT_CARD" || editingBalanceId === i.id || i.currentBalance !== null ? null : (
                     <button onClick={() => startEditingBalance(i)} className="text-xs text-brand-600 hover:underline">
                       Set balance
                     </button>
@@ -287,7 +414,15 @@ export default function InstrumentsPage() {
                     {i.archived ? "Archived" : "Active"}
                   </span>
                 </td>
-                <td className="space-x-3 p-3 text-right">
+                <td className="space-x-3 whitespace-nowrap p-3 text-right">
+                  {i.type !== "CASH" && (
+                    <button
+                      onClick={() => setDetailsId(detailsId === i.id ? null : i.id)}
+                      className="text-xs text-brand-600 hover:underline"
+                    >
+                      {detailsId === i.id ? "Hide details" : "Details"}
+                    </button>
+                  )}
                   <button onClick={() => toggleArchive(i.id, i.archived)} className="text-xs text-brand-600 hover:underline">
                     {i.archived ? "Unarchive" : "Archive"}
                   </button>
@@ -296,6 +431,37 @@ export default function InstrumentsPage() {
                   </button>
                 </td>
               </tr>
+              {i.type !== "CREDIT_CARD" && (editingBalanceId === i.id ? /^\d{4}-\d{2}-\d{2}$/.test(balanceForm.date) : howId === i.id && !!i.openingBalanceDate) && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6} className="px-3 py-2.5">
+                    {/* The table scrolls sideways on a phone: keep this on screen. */}
+                    <div className="sticky left-3 max-w-[calc(100vw-3.5rem)] sm:max-w-2xl">
+                    {editingBalanceId === i.id ? (
+                      <BalanceBreakdown instrumentId={i.id} since={balanceForm.date} opening={balanceForm.amount === "" ? null : parseFloat(balanceForm.amount)} currency={i.currency} />
+                    ) : (
+                      <BalanceBreakdown instrumentId={i.id} since={i.openingBalanceDate!.slice(0, 10)} opening={i.openingBalance == null ? null : Number(i.openingBalance)} currency={i.currency} />
+                    )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {checkId === i.id && i.type !== "CREDIT_CARD" && i.openingBalanceDate && editingBalanceId !== i.id && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6} className="px-3 py-3">
+                    <div className="sticky left-3 max-w-[calc(100vw-3.5rem)] sm:max-w-2xl">
+                      <BalanceCheckPanel instrumentId={i.id} name={i.name} currency={i.currency} since={i.openingBalanceDate.slice(0, 10)} lastCheck={i.lastCheck ?? null} onChanged={refreshInstruments} />
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {detailsId === i.id && (
+                <tr className="border-b bg-gray-50 last:border-0">
+                  <td colSpan={6}>
+                    <AccountDetailsPanel instrumentId={i.id} currency={i.currency} type={i.type} />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {instruments.length === 0 && (
               <tr>
@@ -309,8 +475,8 @@ export default function InstrumentsPage() {
       </div>
 
       <p className="text-xs text-gray-400">
-        "Set balance" records an amount as of a date (e.g. your savings balance today) — the app then tracks it
-        forward using every transaction and transfer touching that instrument from that date on. It doesn't touch
+        &quot;Set balance&quot; records an amount as of a date (e.g. your savings balance today) — the app then tracks it
+        forward using every transaction and transfer touching that instrument from that date on. It doesn&apos;t touch
         activity from before that date.
       </p>
 
@@ -321,7 +487,7 @@ export default function InstrumentsPage() {
           <h2 className="text-lg font-semibold">Transfers</h2>
           <p className="text-sm text-gray-500">
             For moving money between your own accounts — like paying a credit card bill from your bank account.
-            This updates both instruments' balances but never shows up as income or an expense, since the actual
+            This updates both instruments&apos; balances but never shows up as income or an expense, since the actual
             spending was already logged as transactions against the card.
           </p>
         </div>
@@ -331,13 +497,14 @@ export default function InstrumentsPage() {
             You need at least two active instruments to log a transfer between them.
           </p>
         ) : (
-          <form onSubmit={handleTransferSubmit} className="grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-6">
+          <form id="transfer-form" onSubmit={handleTransferSubmit} className={`grid grid-cols-1 gap-3 rounded-lg border bg-white p-4 sm:grid-cols-6 ${editingTransferId ? "border-brand-400 ring-2 ring-brand-100" : ""}`}>
+            {editingTransferId && <p className="text-sm font-medium text-brand-700 sm:col-span-6">Editing a transfer: change what was wrong and save.</p>}
             <select
               value={transferForm.fromInstrumentId}
               onChange={(e) => setTransferForm({ ...transferForm, fromInstrumentId: e.target.value })}
               className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
             >
-              <option value="">From...</option>
+              <option value="">From… (choose)</option>
               {activeInstruments.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
@@ -349,7 +516,7 @@ export default function InstrumentsPage() {
               onChange={(e) => setTransferForm({ ...transferForm, toInstrumentId: e.target.value })}
               className="rounded-md border px-3 py-2 text-sm sm:col-span-2"
             >
-              <option value="">To...</option>
+              <option value="">To… (choose)</option>
               {activeInstruments.map((i) => (
                 <option key={i.id} value={i.id}>
                   {i.name}
@@ -394,16 +561,21 @@ export default function InstrumentsPage() {
             <button
               type="submit"
               disabled={transferSubmitting}
-              className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:col-span-6"
+              className={`rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 ${editingTransferId ? "sm:col-span-5" : "sm:col-span-6"}`}
             >
-              {transferSubmitting ? "Logging..." : "Log transfer"}
+              {transferSubmitting ? "Saving..." : editingTransferId ? "Save changes" : "Log transfer"}
             </button>
+            {editingTransferId && (
+              <button type="button" onClick={cancelEditingTransfer} className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+            )}
             {transferError && <p className="text-sm text-red-600 sm:col-span-6">{transferError}</p>}
           </form>
         )}
 
-        <div className="rounded-lg border bg-white">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border bg-white">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b text-left text-gray-500">
                 <th className="p-3">Date</th>
@@ -416,7 +588,7 @@ export default function InstrumentsPage() {
             </thead>
             <tbody>
               {transfers.map((t) => (
-                <tr key={t.id} className="border-b last:border-0">
+                <tr key={t.id} className={`border-b last:border-0 ${editingTransferId === t.id ? "bg-brand-50" : ""}`}>
                   <td className="p-3">{formatDate(t.date)}</td>
                   <td className="p-3">{t.fromInstrument.name}</td>
                   <td className="p-3">{t.toInstrument.name}</td>
@@ -424,7 +596,10 @@ export default function InstrumentsPage() {
                   <td className="p-3 text-right font-medium">
                     {t.currency} {Number(t.amount).toFixed(2)}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="space-x-3 whitespace-nowrap p-3 text-right">
+                    <button onClick={() => startEditingTransfer(t)} className="text-xs text-brand-600 hover:underline">
+                      Edit
+                    </button>
                     <button onClick={() => handleDeleteTransfer(t.id)} className="text-xs text-red-500 hover:underline">
                       Delete
                     </button>
@@ -442,6 +617,33 @@ export default function InstrumentsPage() {
           </table>
         </div>
       </div>
+      <div className="border-t pt-6">
+        <h2 className="mb-2 text-lg font-semibold">Last activity on each account</h2>
+        <AccountFreshness />
+      </div>
     </div>
+  );
+}
+
+// A card's balance is what its statements say (src/lib/cards.ts), not the
+// sum of its charges -- payments would never come off that.
+function CardBalance({ owed, currency, archived }: { owed: CardOwed | undefined; currency: string; archived: boolean }) {
+  if (archived) return <span className="text-xs text-gray-400">—</span>;
+  if (!owed || !owed.hasCycle || owed.owed == null) {
+    return (
+      <Link href="/cards" className="text-xs text-brand-600 hover:underline">
+        Set up on Credit cards
+      </Link>
+    );
+  }
+  return (
+    <Link href="/cards" className="block hover:underline">
+      <span className="font-medium">
+        {owed.owed < 0 ? "Credit" : "Owed"} {money(Math.abs(owed.owed), currency)}
+      </span>
+      <span className="block text-xs text-gray-400">
+        {owed.left > 0.005 && owed.due ? `${money(owed.left, currency)} due ${formatDate(owed.due, { month: "short", day: "numeric" })}` : "statement paid"}
+      </span>
+    </Link>
   );
 }

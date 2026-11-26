@@ -82,7 +82,7 @@ export default function GoalsPage() {
         <div>
           <h1 className="text-xl font-semibold">Savings Goals</h1>
           <p className="text-sm text-gray-500">
-            Track progress toward a target using a dedicated account's balance — set the account's opening balance
+            Track progress toward a target using a dedicated account&apos;s balance — set the account&apos;s opening balance
             on the Instruments page for this to work.
           </p>
         </div>

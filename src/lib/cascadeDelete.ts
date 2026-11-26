@@ -12,13 +12,31 @@ export async function deleteHouseholdCascade(householdId: string) {
     prisma.debtPayment.deleteMany({ where: { debt: { householdId } } }),
     prisma.debt.deleteMany({ where: { householdId } }),
     prisma.budget.deleteMany({ where: { householdId } }),
+    prisma.plannedExpense.deleteMany({ where: { householdId } }),
     prisma.transfer.deleteMany({ where: { householdId } }),
     prisma.savingsGoal.deleteMany({ where: { householdId } }),
     prisma.notification.deleteMany({ where: { householdId } }),
     prisma.transaction.deleteMany({ where: { householdId } }),
+    prisma.loanContact.deleteMany({ where: { householdId } }),
+    prisma.subscriptionMark.deleteMany({ where: { householdId } }),
+    prisma.emergencyFundEntry.deleteMany({ where: { householdId } }),
+    prisma.investmentTrade.deleteMany({ where: { holding: { account: { householdId } } } }),
+    prisma.holding.deleteMany({ where: { account: { householdId } } }),
+    prisma.investmentAccount.deleteMany({ where: { householdId } }),
+    prisma.policyDocument.deleteMany({ where: { policy: { householdId } } }),
+    prisma.insurancePolicy.deleteMany({ where: { householdId } }),
+    prisma.accountDetails.deleteMany({ where: { instrument: { householdId } } }),
+    prisma.cardStatement.deleteMany({ where: { instrument: { householdId } } }),
+    prisma.balanceCheck.deleteMany({ where: { instrument: { householdId } } }),
+    prisma.periodClose.deleteMany({ where: { instrument: { householdId } } }),
+    prisma.importBatch.deleteMany({ where: { householdId } }),
     prisma.recurringTemplate.deleteMany({ where: { householdId } }),
+    prisma.itemCategoryRule.deleteMany({ where: { householdId } }),
+    prisma.duplicateDecision.deleteMany({ where: { householdId } }),
     prisma.transactionCategory.deleteMany({ where: { householdId } }),
     prisma.paymentInstrument.deleteMany({ where: { householdId } }),
+    prisma.pendingTelegramTransaction.deleteMany({ where: { householdId } }),
+    prisma.telegramLink.deleteMany({ where: { householdId } }),
     prisma.user.deleteMany({ where: { householdId } }),
     prisma.household.delete({ where: { id: householdId } }),
   ]);
@@ -43,6 +61,12 @@ export async function deleteInstrumentCascade(instrumentId: string) {
   }
   await prisma.$transaction([
     prisma.recurringTemplate.deleteMany({ where: { instrumentId } }),
+    // Import records whose transactions were all deleted since.
+    prisma.importBatch.deleteMany({ where: { instrumentId } }),
+    prisma.accountDetails.deleteMany({ where: { instrumentId } }),
+    prisma.cardStatement.deleteMany({ where: { instrumentId } }),
+    prisma.balanceCheck.deleteMany({ where: { instrumentId } }),
+    prisma.periodClose.deleteMany({ where: { instrumentId } }),
     prisma.paymentInstrument.delete({ where: { id: instrumentId } }),
   ]);
 }
@@ -52,6 +76,8 @@ export async function deleteCategoryCascade(categoryId: string, reassignToCatego
     await prisma.$transaction([
       prisma.transaction.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
       prisma.recurringTemplate.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
+      // Items remembered as this category now belong to the one taking over.
+      prisma.itemCategoryRule.updateMany({ where: { categoryId }, data: { categoryId: reassignToCategoryId } }),
       prisma.budget.deleteMany({ where: { categoryId } }),
       prisma.transactionCategory.delete({ where: { id: categoryId } }),
     ]);
@@ -72,5 +98,29 @@ export async function deleteDebtCascade(debtId: string) {
   await prisma.$transaction([
     prisma.debtPayment.deleteMany({ where: { debtId } }),
     prisma.debt.delete({ where: { id: debtId } }),
+  ]);
+}
+// A policy's documents go with it; premiums already paid stay as ordinary
+// transactions, just no longer linked to a policy.
+export async function deletePolicyCascade(policyId: string) {
+  await prisma.$transaction([
+    prisma.transaction.updateMany({ where: { policyId }, data: { policyId: null } }),
+    prisma.policyDocument.deleteMany({ where: { policyId } }),
+    prisma.insurancePolicy.delete({ where: { id: policyId } }),
+  ]);
+}
+
+export async function deleteHoldingCascade(holdingId: string) {
+  await prisma.$transaction([
+    prisma.investmentTrade.deleteMany({ where: { holdingId } }),
+    prisma.holding.delete({ where: { id: holdingId } }),
+  ]);
+}
+
+export async function deleteInvestmentAccountCascade(accountId: string) {
+  await prisma.$transaction([
+    prisma.investmentTrade.deleteMany({ where: { holding: { accountId } } }),
+    prisma.holding.deleteMany({ where: { accountId } }),
+    prisma.investmentAccount.delete({ where: { id: accountId } }),
   ]);
 }

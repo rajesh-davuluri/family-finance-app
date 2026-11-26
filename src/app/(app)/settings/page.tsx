@@ -2,7 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Analytics } from "@vercel/analytics/next"
+
+type TelegramStatus =
+  | { configured: false }
+  | {
+      configured: true;
+      secretUsable: boolean;
+      tokenValid: boolean;
+      botUsername: string | null;
+      connected: boolean;
+      lastError: string | null;
+      linkCode: string | null;
+      linkedChats: number;
+      moneySummary: boolean;
+    };
 
 export default function SettingsPage() {
   const { data: session } = useSession();
@@ -13,6 +26,9 @@ export default function SettingsPage() {
   const [code, setCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [telegram, setTelegram] = useState<TelegramStatus | null | undefined>(undefined);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramMessage, setTelegramMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/mfa/status")
@@ -21,7 +37,33 @@ export default function SettingsPage() {
         setMfaEnabled(d.mfaEnabled);
         setLoading(false);
       });
+    loadTelegram();
   }, []);
+
+  function loadTelegram() {
+    fetch("/api/telegram/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setTelegram)
+      .catch(() => setTelegram(null));
+  }
+
+  async function setMoneySummary(on: boolean) {
+    setTelegramBusy(true);
+    const res = await fetch("/api/telegram/summary", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }) });
+    setTelegramBusy(false);
+    if (!res.ok) return setTelegramMessage("Couldn't save the summary setting.");
+    setTelegram((t) => (t && t.configured ? { ...t, moneySummary: on } : t));
+  }
+
+  async function connectTelegram() {
+    setTelegramBusy(true);
+    setTelegramMessage(null);
+    const res = await fetch("/api/telegram/connect", { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    setTelegramBusy(false);
+    setTelegramMessage(res.ok ? "Bot connected." : body.error ?? "Couldn't connect the bot.");
+    loadTelegram();
+  }
 
   async function startSetup() {
     setBusy(true);
@@ -80,6 +122,106 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-lg border bg-white p-4">
+        <h2 className="mb-1 text-sm font-medium text-gray-700">Telegram bot</h2>
+        <p className="mb-3 text-sm text-gray-500">
+          Send purchases to your own Telegram bot — “450 swiggy hdfc”, or paste a bank alert — and add them with one
+          tap after checking the card and category.
+        </p>
+        {telegram === undefined ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : telegram === null || !telegram.configured ? (
+          <div className="space-y-1 rounded-md bg-gray-50 p-3 text-xs text-gray-500">
+            <p>Not set up on this server yet:</p>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                In Telegram, message <span className="font-medium">@BotFather</span>, send <code>/newbot</code>, pick a
+                name and a username ending in “bot”, and copy the token it gives you.
+              </li>
+              <li>
+                In Vercel → Environment Variables, add <code>TELEGRAM_BOT_TOKEN</code> (that token) and{" "}
+                <code>TELEGRAM_WEBHOOK_SECRET</code> (a long random string of letters and numbers only), then redeploy.
+              </li>
+            </ol>
+          </div>
+        ) : !telegram.tokenValid ? (
+          <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+            Telegram didn&apos;t accept TELEGRAM_BOT_TOKEN — copy it again from @BotFather, update it in Vercel and
+            redeploy.
+          </p>
+        ) : (
+          <div className="space-y-3 text-sm">
+            {!telegram.connected ? (
+              <div className="space-y-2">
+                <p className="text-gray-600">
+                  Step 1 — connect <span className="font-medium">@{telegram.botUsername}</span> to this app (once for
+                  the household):
+                </p>
+                <button
+                  onClick={connectTelegram}
+                  disabled={telegramBusy || !telegram.secretUsable}
+                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {telegramBusy ? "Connecting..." : "Connect bot"}
+                </button>
+                {!telegram.secretUsable && (
+                  <p className="text-xs text-red-600">
+                    TELEGRAM_WEBHOOK_SECRET may only contain letters, numbers, _ and - (at least 16 characters).
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-income-600">
+                ✓ @{telegram.botUsername} is connected.
+                {telegram.lastError && (
+                  <span className="block text-xs text-amber-700">Last delivery problem: {telegram.lastError}</span>
+                )}
+              </p>
+            )}
+            {telegram.connected && telegram.linkCode && (
+              <div className="space-y-2">
+                <p className="text-gray-600">
+                  {telegram.linkedChats > 0
+                    ? `✓ Your Telegram is linked (${telegram.linkedChats} chat${telegram.linkedChats === 1 ? "" : "s"}). To link another device or account:`
+                    : "Step 2 — link your Telegram account:"}
+                </p>
+                <a
+                  href={`https://t.me/${telegram.botUsername}?start=${telegram.linkCode}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block rounded-md border px-4 py-2 text-sm hover:bg-gray-50"
+                >
+                  Open in Telegram
+                </a>
+                <p className="text-xs text-gray-400">
+                  Then tap <em>Start</em>. Or send the bot: <code>/start {telegram.linkCode}</code>. Each family member
+                  links from their own Settings page.
+                </p>
+              </div>
+            )}
+            {telegram.connected && (
+              <label className="flex items-start gap-2 border-t pt-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={telegram.moneySummary}
+                  disabled={telegramBusy}
+                  onChange={(e) => setMoneySummary(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-gray-700">Money summary</span>
+                  <span className="block text-xs text-gray-500">
+                    Every Sunday morning, last week&apos;s income and expenses by category; on the 1st, the same for the month. Sent to every
+                    linked Telegram in the household. It goes out with the daily reminders, so it doesn&apos;t wake the database on its own.
+                  </span>
+                </span>
+              </label>
+            )}
+            {telegramMessage && <p className="text-xs text-gray-500">{telegramMessage}</p>}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border bg-white p-4">
         <h2 className="mb-1 text-sm font-medium text-gray-700">Two-factor authentication</h2>
         <p className="mb-3 text-sm text-gray-500">
           Require a code from an authenticator app (Google Authenticator, Authy, 1Password, etc.) in addition to your
@@ -103,7 +245,7 @@ export default function SettingsPage() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qrDataUrl} alt="MFA QR code" className="h-40 w-40" />
             <p className="text-xs text-gray-400">
-              Can't scan? Enter this key manually: <code className="rounded bg-gray-100 px-1">{secret}</code>
+              Can&apos;t scan? Enter this key manually: <code className="rounded bg-gray-100 px-1">{secret}</code>
             </p>
             <div className="flex items-center gap-2">
               <input

@@ -4,7 +4,6 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Analytics } from "@vercel/analytics/next";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,6 +33,16 @@ export default function LoginPage() {
       setError(needsMfa ? "That code didn't work — try again." : "Enter the code from your authenticator app.");
       return;
     }
+    if (result?.error === "SERVER_UNAVAILABLE") {
+      setError("The server couldn't reach the database — this isn't your password. Try again in a minute.");
+      return;
+    }
+    if (result?.error && result.error !== "CredentialsSignin") {
+      // Anything other than a plain credential mismatch is a server-side
+      // failure (misconfiguration, crash) rather than a wrong password.
+      setError(`Sign-in failed on the server (${result.error}). This isn't your password.`);
+      return;
+    }
     if (result?.error) {
       setError("Incorrect email or password.");
       return;
@@ -46,7 +55,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm rounded-lg border bg-white p-6 shadow-sm">
         <h1 className="mb-1 text-xl font-semibold">Sign in</h1>
-        <p className="mb-6 text-sm text-gray-500">Access your household's finance tracker.</p>
+        <p className="mb-6 text-sm text-gray-500">Access your household&apos;s finance tracker.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

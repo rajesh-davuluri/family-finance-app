@@ -10,7 +10,16 @@ A multi-user (household) personal finance tracker built with **Next.js 15 (App R
 - **Categories** — income/expense categories, seeded with sensible defaults on signup
 - **Transactions** — multi-currency, filterable, with notes
 - **Recurring transactions** — templates that auto-generate real transactions on a schedule (or on-demand via a "Generate now" button)
-- **Statement reconciliation** — upload a credit card statement PDF (PDF only; read in memory, never stored) to see which of its transactions are already recorded, matched by amount and/or date, which are missing (add them in one click), and which app entries for that card aren't on the statement
+- **Year ahead** — the big costs that don't come every month (premiums, a trip to India, school fees) turned into one amount to set aside from each paycheck, with the money set aside kept out of the planner's "safe to spend"
+- **Balance check** — type in what the bank shows for an account and see whether the app agrees; when it doesn't, the likely causes (a duplicate, a wrong-way entry, a missing statement) are listed
+- **Monthly close** — each period, check every bank account (by month) and card (by statement) against the bank or card and close it; a difference can be accepted as a recorded balance adjustment, with a tolerance and a full history
+- **Money summary on Telegram** — every Sunday, last week's income and expenses by category and what was left over; on the 1st, the same for the month (Settings → Telegram bot)
+- **Rewards at checkout** — when part of a purchase is paid with card rewards or cashback, enter what the card charged plus the rewards used: the card stays matched to its statement, the full price is kept, and Reports totals what rewards paid for
+- **Fees & interest** — card interest, late, annual, foreign transaction, overdraft, ATM and bank fees found in your transactions from the statement wording: what they cost by type and card (Reports), reversals marked waived, and new ones or interest month after month flagged in Needs attention with what to do
+- **Returns & refunds** — mark a purchase as being returned and the refund is paired automatically when it arrives (flagged if it's short or 2 weeks late); set a return-by date to be reminded before the window closes
+- **Subscriptions** — every charge that repeats (streaming, apps, memberships, phone), found in your transactions: what they cost a month and a year, price rises, double charges, new ones, and anything charged after you chose to cancel
+- **Lent & borrowed** — money between you and friends or family, by person: who owes whom and since when, repayments, a friendly reminder to copy, and the balances in net worth
+- **Emergency fund** — months of essential spending covered against a 3, 6 or 12-month target; "Add money" and "Take out" record who put money in (kept as history), with this month's additions, the pace of the last three months, and when the target is reached at that pace
 - **Dashboard** — this-month income/expense/net, spending-by-category chart, 6-month trend, recent activity
 
 ## 1. Prerequisites
@@ -61,7 +70,7 @@ See `.env.example` for the full annotated list. You need:
 5. **Run migrations against it**: temporarily set `DATABASE_URL` to that string in your terminal, then `npx prisma migrate deploy`.
 6. **Import into Vercel** (vercel.com → sign in with GitHub → Add New Project). Before deploying, add all the environment variables from step 3 above (using the Azure connection string, not your local one) under Project Settings → Environment Variables.
 7. **Deploy.** Vercel gives you a free `https://your-project.vercel.app` URL.
-8. **Recurring transactions on a schedule**: `vercel.json` already defines a daily cron hitting `/api/cron/generate-recurring` — just make sure `CRON_SECRET` is set as an environment variable on the Vercel project (same value the cron will send automatically).
+8. **Recurring transactions on a schedule**: `vercel.json` already defines one daily cron hitting `/api/cron/daily` (recurring transactions, then reminders, in one run so the serverless database wakes once a day) — just make sure `CRON_SECRET` is set as an environment variable on the Vercel project (same value the cron will send automatically).
 
 ## 6. Security notes — read before letting family use this for real
 

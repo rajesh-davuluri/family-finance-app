@@ -11,6 +11,10 @@ const updateSchema = z.object({
   notes: z.string().optional(),
   categoryId: z.string().optional(),
   instrumentId: z.string().optional(),
+  // Paid with card rewards / cashback; null or 0 clears it.
+  rewardsAmount: z.number().min(0).max(10_000_000).nullable().optional(),
+  // null: no longer money with a person (Lent & borrowed).
+  loanContactId: z.null().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,10 +30,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = updateSchema.safeParse(await req.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
-  const { date, ...rest } = parsed.data;
+  const { date, rewardsAmount, ...rest } = parsed.data;
   const updated = await prisma.transaction.update({
     where: { id },
-    data: { ...rest, ...(date ? { date: new Date(date) } : {}) },
+    data: { ...rest, ...(date ? { date: new Date(date) } : {}), ...(rewardsAmount !== undefined ? { rewardsAmount: rewardsAmount || null } : {}) },
     include: { category: true, instrument: true },
   });
   return NextResponse.json(updated);

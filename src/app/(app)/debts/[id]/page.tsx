@@ -261,7 +261,7 @@ export default function DebtDetailPage() {
           {error && <p className="text-sm text-red-600 sm:col-span-5">{error}</p>}
           {form.currency !== debt.currency && (
             <p className="text-xs text-gray-400 sm:col-span-5">
-              You're paying in {form.currency}, this debt is tracked in {debt.currency} — it'll be converted automatically using{" "}
+              You&apos;re paying in {form.currency}, this debt is tracked in {debt.currency} — it&apos;ll be converted automatically using{" "}
               {rate ? "this debt's own rate" : "the app's default rate"} when calculating the balance.
             </p>
           )}

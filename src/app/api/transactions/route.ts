@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { describeExisting, findExistingDuplicate, rememberNotDuplicates } from "@/lib/duplicateData";
 import { Currency } from "@/lib/enums";
 import { notifyHousehold } from "@/lib/notify";
 
@@ -12,6 +13,14 @@ const createSchema = z.object({
   notes: z.string().optional(),
   categoryId: z.string(),
   instrumentId: z.string(),
+  // Paid with card rewards / cashback on top of `amount` (what was charged).
+  rewardsAmount: z.number().min(0).max(10_000_000).nullable().optional(),
+  // The last day it can be returned (optional).
+  returnBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // Set after the person has seen the duplicate warning and chosen to add it anyway.
+  allowDuplicate: z.boolean().optional(),
+  // Added anyway after the duplicate warning: remember that pair is fine.
+  notDuplicateOf: z.string().max(64).optional(),
 });
 
 export async function GET(req: Request) {
@@ -34,7 +43,14 @@ export async function GET(req: Request) {
       ...(categoryId ? { categoryId } : {}),
       ...(instrumentId ? { instrumentId } : {}),
     },
-    include: { category: true, instrument: true, createdBy: { select: { name: true } } },
+    include: {
+      category: true,
+      instrument: true,
+      createdBy: { select: { name: true } },
+      importBatch: { select: { fileName: true } },
+      attachment: { select: { id: true } },
+      loanContact: { select: { name: true } },
+    },
     orderBy: { date: "desc" },
     take: limit,
   });
@@ -62,19 +78,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid payment instrument." }, { status: 400 });
   }
 
+  // Likely already recorded (e.g. imported from the statement, or sent from
+  // Telegram)? Ask first instead of adding a second copy.
+  if (!data.allowDuplicate) {
+    const dup = await findExistingDuplicate(user.householdId, {
+      date: data.date.slice(0, 10),
+      amount: data.amount,
+      currency: data.currency,
+      instrumentId: data.instrumentId,
+      notes: data.notes ?? null,
+      source: "MANUAL",
+    });
+    if (dup && dup.match.confidence === "HIGH") {
+      return NextResponse.json(
+        { error: "This looks like it's already recorded.", duplicate: { ...describeExisting(dup.existing), reason: dup.match.reason } },
+        { status: 409 }
+      );
+    }
+  }
+
   const transaction = await prisma.transaction.create({
     data: {
+      source: "MANUAL",
       amount: data.amount,
       currency: data.currency,
       date: new Date(data.date),
       notes: data.notes,
       categoryId: data.categoryId,
       instrumentId: data.instrumentId,
+      rewardsAmount: data.rewardsAmount ? data.rewardsAmount : null,
+      returnBy: data.returnBy ? new Date(`${data.returnBy}T00:00:00Z`) : null,
       householdId: user.householdId,
       createdById: user.id,
     },
     include: { category: true, instrument: true },
   });
+
+  if (data.notDuplicateOf) await rememberNotDuplicates(user.householdId, [[transaction.id, data.notDuplicateOf]]);
 
   const verb = category.direction === "INCOME" ? "income" : "an expense";
   await notifyHousehold(

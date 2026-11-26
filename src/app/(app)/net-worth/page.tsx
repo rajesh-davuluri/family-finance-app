@@ -5,6 +5,8 @@ import { NetWorthTrendChart } from "@/components/NetWorthChart";
 
 type NetWorthData = {
   assets: number;
+  cash: number;
+  investments: number;
   liabilities: number;
   netWorth: number;
   untrackedInstrumentCount: number;
@@ -30,7 +32,10 @@ export default function NetWorthPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Net Worth</h1>
-        <p className="text-sm text-gray-500">Approx. USD — assets (accounts with a balance set) minus active debts.</p>
+        <p className="text-sm text-gray-500">
+          Approx. USD — assets (accounts with a balance set, plus investments at today&apos;s prices) minus active debts. Past months count
+          investments at what was paid for them.
+        </p>
       </div>
 
       <div className="rounded-lg border bg-white p-6 text-center">
@@ -44,6 +49,15 @@ export default function NetWorthPage() {
         <div className="rounded-lg border bg-white p-4">
           <p className="text-sm text-gray-500">Assets</p>
           <p className="font-display mt-1 text-2xl font-semibold text-income-600">${data.assets.toFixed(2)}</p>
+          {data.investments > 0 && (
+            <p className="mt-1 text-xs text-gray-500">
+              Accounts ${data.cash.toFixed(2)} ·{" "}
+              <a href="/investments" className="underline">
+                Investments
+              </a>{" "}
+              ${data.investments.toFixed(2)}
+            </p>
+          )}
         </div>
         <div className="rounded-lg border bg-white p-4">
           <p className="text-sm text-gray-500">Liabilities</p>

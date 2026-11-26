@@ -1,8 +1,11 @@
 "use client";
 
+import { isAdjustmentCategory } from "@/lib/periodClose";
 import { useEffect, useState } from "react";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
+import DetectedBills from "@/components/DetectedBills";
+import { money } from "@/lib/money";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
 type Instrument = { id: string; name: string; archived: boolean };
@@ -55,8 +58,7 @@ export default function RecurringPage() {
     setInstruments(insts);
     setForm((f) => ({
       ...f,
-      categoryId: f.categoryId || cats[0]?.id || "",
-      instrumentId: f.instrumentId || insts.find((i: Instrument) => !i.archived)?.id || "",
+      categoryId: f.categoryId || (cats.find((c: { name: string }) => !isAdjustmentCategory(c.name)) ?? cats[0])?.id || "",
     }));
     setLoading(false);
   }
@@ -68,6 +70,10 @@ export default function RecurringPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!form.instrumentId) {
+      setError("Choose the account or card it's paid from.");
+      return;
+    }
     setSubmitting(true);
     const res = await fetch("/api/recurring", {
       method: "POST",
@@ -80,7 +86,7 @@ export default function RecurringPage() {
       setError(typeof body.error === "string" ? body.error : "Couldn't save that template.");
       return;
     }
-    setForm((f) => ({ ...f, amount: "", notes: "" }));
+    setForm((f) => ({ ...f, amount: "", notes: "", instrumentId: "" }));
     load();
   }
 
@@ -118,7 +124,7 @@ export default function RecurringPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Recurring transactions</h1>
+        <h1 className="text-xl font-semibold">Recurring bills</h1>
         <button
           onClick={generateNow}
           disabled={generating}
@@ -127,9 +133,12 @@ export default function RecurringPage() {
           {generating ? "Generating..." : "Generate now"}
         </button>
       </div>
+      <DetectedBills />
+
+      <h2 className="pt-2 font-medium">Scheduled transactions</h2>
       <p className="text-sm text-gray-500">
         Templates for bills or income that repeat automatically. On a deployed site, these generate on a schedule (see
-        the README's Vercel Cron setup) — locally, use "Generate now" to trigger it manually.
+        the README&apos;s Vercel Cron setup) — locally, use &quot;Generate now&quot; to trigger it manually.
       </p>
       {genMessage && <p className="text-sm text-brand-700">{genMessage}</p>}
 
@@ -171,6 +180,7 @@ export default function RecurringPage() {
           onChange={(e) => setForm({ ...form, instrumentId: e.target.value })}
           className="rounded-md border px-3 py-2 text-sm"
         >
+          <option value="">Choose account or card…</option>
           {instruments
             .filter((i) => !i.archived)
             .map((i) => (
@@ -215,7 +225,38 @@ export default function RecurringPage() {
       </form>
 
       <div className="rounded-lg border bg-white">
-        <table className="w-full text-sm">
+        <ul className="divide-y text-sm md:hidden">
+          {templates.map((t) => (
+            <li key={t.id} className={`px-4 py-3 ${t.active ? "" : "opacity-60"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink-900">{t.notes || t.category.name}</p>
+                  <p className="text-xs text-gray-500">
+                    {FREQ_LABELS[t.frequency] ?? t.frequency} · next {formatDate(t.nextRunAt)}
+                  </p>
+                  <p className="truncate text-xs text-gray-400">
+                    {t.category.name} · {t.instrument.name}
+                    {t.instrument.archived && <span className="text-amber-700"> (archived — not running; move it to another account)</span>}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-medium tabular-nums">{money(Number(t.amount), t.currency)}</p>
+                  <p className={`text-xs ${t.active ? "text-green-600" : "text-gray-400"}`}>{t.active ? "Active" : "Paused"}</p>
+                </div>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => toggleActive(t.id, t.active)} className="min-h-[36px] rounded-md border px-3 text-xs text-brand-700">
+                  {t.active ? "Pause" : "Resume"}
+                </button>
+                <button onClick={() => handleDelete(t.id)} className="min-h-[36px] rounded-md border px-3 text-xs text-red-600">
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+          {templates.length === 0 && <li className="p-6 text-center text-gray-400">No recurring templates yet.</li>}
+        </ul>
+        <table className="hidden w-full text-sm md:table">
           <thead>
             <tr className="border-b text-left text-gray-500">
               <th className="p-3">Next run</th>
@@ -233,9 +274,12 @@ export default function RecurringPage() {
                 <td className="p-3">{formatDate(t.nextRunAt)}</td>
                 <td className="p-3">{FREQ_LABELS[t.frequency] ?? t.frequency}</td>
                 <td className="p-3">{t.category.name}</td>
-                <td className="p-3">{t.instrument.name}</td>
+                <td className="p-3">
+                  {t.instrument.name}
+                  {t.instrument.archived && <span className="block text-xs text-amber-700">archived — not running</span>}
+                </td>
                 <td className="p-3 text-right">
-                  {t.currency} {Number(t.amount).toFixed(2)}
+                  {money(Number(t.amount), t.currency)}
                 </td>
                 <td className="p-3">
                   <span className={t.active ? "text-green-600" : "text-gray-400"}>

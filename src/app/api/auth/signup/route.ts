@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { inferKind } from "@/lib/categoryKind";
+import { inferGroup } from "@/lib/categoryGroups";
 
 // Two signup paths, distinguished by whether `inviteCode` is present:
 //   - No inviteCode  -> creates a brand-new household, this person becomes ADMIN
@@ -68,10 +70,20 @@ export async function POST(req: Request) {
       { name: "Entertainment", direction: "EXPENSE" },
       { name: "Healthcare", direction: "EXPENSE" },
       { name: "Other Expense", direction: "EXPENSE" },
+      // So paying a card bill or moving money to savings isn't counted as spending.
+      { name: "Credit Card Payment", direction: "EXPENSE" },
+      { name: "Savings & Investments", direction: "EXPENSE" },
+      { name: "Refunds", direction: "INCOME" },
     ];
     for (const cat of defaultCategories) {
       await tx.transactionCategory.create({
-        data: { ...cat, householdId: household.id, isDefault: true },
+        data: {
+          ...cat,
+          kind: inferKind(cat.name, cat.direction),
+          group: inferGroup(cat.name, inferKind(cat.name, cat.direction)),
+          householdId: household.id,
+          isDefault: true,
+        },
       });
     }
 

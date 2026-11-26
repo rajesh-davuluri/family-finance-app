@@ -29,6 +29,31 @@ model Household {
   inviteCode String   @unique @default(cuid())
   createdAt  DateTime @default(now())
 
+  // The emergency fund: money set aside for emergencies (typed in), and how
+  // many months of essential spending it should cover. A bank account named
+  // "Emergency..." with a balance takes the place of the typed-in amount.
+  // emergencyFundUsd is the starting amount; the fund is that plus every
+  // EmergencyFundEntry (money added or taken out since).
+  emergencyFundUsd     Decimal? @db.Decimal(12, 2)
+  emergencyTargetMonths Int      @default(6)
+
+  // Payday planner: the least the bank accounts should hold. A day the
+  // forecast dips under it is flagged as tight.
+  cashCushionUsd Decimal? @db.Decimal(12, 2)
+
+  // Year ahead: the money already set aside for the big irregular costs
+  // (PlannedExpense), and what the household means to add each paycheck.
+  yearAheadSetAsideUsd  Decimal? @db.Decimal(12, 2)
+  yearAheadPerPaydayUsd Decimal? @db.Decimal(12, 2)
+
+  // Monthly close: a difference up to this much (approx USD) can be accepted
+  // as a recorded balance adjustment without explaining it. Null = $10.
+  closeToleranceUsd Decimal? @db.Decimal(12, 2)
+
+  // The money summary on Telegram (src/lib/moneySummary.ts): Sundays for
+  // the week, the 1st for the month.
+  moneySummary Boolean @default(true)
+
   users       User[]
   instruments PaymentInstrument[]
   categories  TransactionCategory[]
@@ -39,6 +64,16 @@ model Household {
   transfers   Transfer[]
   goals       SavingsGoal[]
   notifications Notification[]
+  importBatches ImportBatch[]
+  telegramLinks TelegramLink[]
+  policies      InsurancePolicy[]
+  itemCategoryRules  ItemCategoryRule[]
+  duplicateDecisions DuplicateDecision[]
+  investmentAccounts InvestmentAccount[]
+  plannedExpenses    PlannedExpense[]
+  loanContacts       LoanContact[]
+  subscriptionMarks  SubscriptionMark[]
+  emergencyFundEntries EmergencyFundEntry[]
 }
 
 model User {
@@ -52,6 +87,12 @@ model User {
   mfaEnabled        Boolean @default(false)
   mfaSecretEncrypted String? @db.NVarChar(Max)
 
+  // Set on each successful sign-in: lastLoginAt is the current/most recent
+  // one, previousLoginAt the one before it (what "your last login was"
+  // shows, since lastLoginAt is normally the session you're in).
+  lastLoginAt     DateTime?
+  previousLoginAt DateTime?
+
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -61,6 +102,9 @@ model User {
   ownedDebts          Debt[]
   createdTransfers    Transfer[]
   notifications       Notification[]
+  importBatches       ImportBatch[]
+  telegramLinks       TelegramLink[]
+  emergencyFundEntries EmergencyFundEntry[]
 }
 
 model PaymentInstrument {
@@ -80,6 +124,16 @@ model PaymentInstrument {
   openingBalance     Decimal?  @db.Decimal(12, 2)
   openingBalanceDate DateTime?
 
+  // Credit cards only: the card's credit limit. Utilization is derived from
+  // the current balance (negative = owed), never stored.
+  creditLimit Decimal? @db.Decimal(12, 2)
+
+  // Credit cards only: the day of the month the statement closes and the day
+  // the payment is due (both printed on every statement). They set the
+  // billing cycles on the Credit cards page.
+  statementDay Int?
+  dueDay       Int?
+
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -88,8 +142,109 @@ model PaymentInstrument {
   transfersOut       Transfer[] @relation("TransferFrom")
   transfersIn        Transfer[] @relation("TransferTo")
   goals              SavingsGoal[]
+  importBatches      ImportBatch[]
+  details            AccountDetails?
+  cardStatements     CardStatement[]
+  balanceChecks      BalanceCheck[]
+  periodCloses       PeriodClose[]
 
   createdAt   DateTime @default(now())
+}
+
+// Reference details for an account (bank, branch, IFSC/routing number,
+// customer ID, where its login is kept). Kept apart from PaymentInstrument
+// so they never ride along when transactions include their instrument.
+// The full account number is stored encrypted (src/lib/encryption.ts) and
+// only sent to the browser when someone clicks "Show". Passwords are not
+// stored anywhere: loginNote says where they are kept (e.g. Bitwarden).
+model AccountDetails {
+  id String @id @default(uuid())
+
+  instrumentId String            @unique
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  bankName               String?
+  branch                 String?
+  routingCode            String? // IFSC (India) or ABA routing number (US)
+  accountNumberEncrypted String? @db.NVarChar(Max)
+  accountNumberLast4     String?
+  accountHolder          String?
+  customerId             String?
+  nominee                String?
+  phone                  String?
+  website                String?
+  loginNote              String? @db.NVarChar(Max)
+  notes                  String? @db.NVarChar(Max)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A life (LIC endowment / money-back), term, health or other insurance
+// policy: its numbers, people, contacts and premium schedule. Paying a
+// premium records an ordinary Transaction and moves nextDueDate on (see
+// src/lib/policies.ts); reminders go out before it is due
+// (/api/cron/policy-reminders).
+model InsurancePolicy {
+  id String @id @default(uuid())
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  kind          String  // LIFE | TERM | HEALTH | VEHICLE | OTHER -- see src/lib/policies.ts
+  status        String  @default("ACTIVE") // ACTIVE | PAID_UP | MATURED | LAPSED | SURRENDERED
+  insurer       String  // e.g. "LIC of India"
+  planName      String? // e.g. "Jeevan Anand (915)"
+  policyNumber  String?
+  insuredPerson String?
+  nominee       String?
+
+  currency       String   @default("INR")
+  sumAssured     Decimal? @db.Decimal(14, 2)
+  maturityAmount Decimal? @db.Decimal(14, 2) // expected payout, if any (LIC endowment); null for term
+
+  premiumAmount    Decimal?  @db.Decimal(12, 2)
+  premiumFrequency String?   // MONTHLY | QUARTERLY | HALF_YEARLY | YEARLY | SINGLE
+  nextDueDate      DateTime?
+  premiumEndDate   DateTime? // last premium (LIC often stops premiums before the policy ends)
+  startDate        DateTime?
+  endDate          DateTime? // maturity date, or when term cover ends
+
+  agentName  String?
+  agentPhone String?
+  helpline   String?
+  website    String?
+  loginNote  String? @db.NVarChar(Max)
+  notes      String? @db.NVarChar(Max)
+  // Anything else, as JSON [{ "label": "Rider", "value": "Accident benefit" }].
+  extraFields String? @db.NVarChar(Max)
+
+  payments  Transaction[]
+  documents PolicyDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([householdId])
+}
+
+// A file kept with a policy: the bond, premium receipts, a nominee form.
+// Stored in the database itself (a few MB at most) so nothing about a
+// policy lives anywhere else.
+model PolicyDocument {
+  id          String @id @default(uuid())
+  policyId    String
+  policy      InsurancePolicy @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fileName    String @db.NVarChar(255)
+  contentType String
+  size        Int
+  data        Bytes  @db.VarBinary(Max)
+
+  uploadedById String
+
+  createdAt DateTime @default(now())
+
+  @@index([policyId])
 }
 
 model TransactionCategory {
@@ -97,6 +252,14 @@ model TransactionCategory {
   name      String
   direction String  // INCOME | EXPENSE — see src/lib/enums.ts
   isDefault Boolean @default(false)
+  // How its transactions count in totals: INCOME | REFUND | SPENDING | BILL |
+  // DEBT_PAYMENT | SAVINGS | TRANSFER | LOAN -- see src/lib/categoryKind.ts.
+  // Null means "not chosen yet": the kind is guessed from the name.
+  kind      String?
+  // Which group it rolls up into in reports: INCOME | HOUSING | UTILITIES |
+  // TRANSPORTATION | FOOD | FAMILY | OBLIGATIONS | LIFESTYLE | SAVINGS |
+  // TRANSFERS | OTHER -- see src/lib/categoryGroups.ts. Null: guessed.
+  group     String? @map("categoryGroup")
 
   householdId String
   household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -104,6 +267,7 @@ model TransactionCategory {
   transactions Transaction[]
   recurring    RecurringTemplate[]
   budgets      Budget[]
+  itemRules    ItemCategoryRule[]
 
   createdAt DateTime @default(now())
 
@@ -132,9 +296,57 @@ model Transaction {
   recurringTemplateId String?
   recurringTemplate   RecurringTemplate? @relation(fields: [recurringTemplateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // How it got into the app: MANUAL | IMPORTED | EMAIL | TELEGRAM | RECURRING
+  // (see src/lib/lastActivity.ts). Null on rows created before this was
+  // recorded -- those are inferred from importBatchId/recurringTemplateId.
+  source String?
+
+  // Set when the transaction came from a CSV import, null when entered by hand.
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // Set when this is a premium paid on an insurance policy, so the policy
+  // shows its own payment history.
+  policyId String?
+  policy   InsurancePolicy? @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // A photo of the bill or receipt, taken with the phone.
+  attachment TransactionAttachment?
+
+  // Set on every part of one bill split across categories (a Costco trip:
+  // groceries + clothing + household). The parts add up to the charge, and
+  // duplicate checks treat them as that one charge.
+  splitGroupId String?
+
+  // For money sent to India: what arrived in rupees (and any fee).
+  remittance RemittanceDetail?
+
+  paycheck PaycheckDetail?
+
+  // Lent & borrowed: the person this money was lent to, borrowed from or
+  // repaid to -- see src/lib/personalLoans.ts.
+  loanContactId String?
+  loanContact   LoanContact? @relation(fields: [loanContactId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // Part of the price paid with card rewards or cashback at checkout. The
+  // amount above is what the card or account was charged (as on the
+  // statement); amount + rewardsAmount is the full price.
+  rewardsAmount Decimal? @db.Decimal(12, 2)
+
+  // Returns (src/lib/returns.ts). returnBy: the last day the store takes it
+  // back. returnState: RETURNING (sent back, refund awaited) | REFUNDED
+  // (paired with its refund, refundTxnId) | KEPT (decided not to return).
+  returnBy       DateTime?
+  returnState    String?   @db.NVarChar(20)
+  returnSentOn   DateTime?
+  returnExpected Decimal?  @db.Decimal(12, 2)
+  refundTxnId    String?   @db.NVarChar(100)
+
   createdAt DateTime @default(now())
 
   @@index([householdId, date])
+  @@index([splitGroupId])
+  @@index([loanContactId])
 }
 
 model RecurringTemplate {
@@ -214,6 +426,11 @@ model Budget {
   categoryId String
   category   TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  // The month ("2026-11") of the last 80% / over-budget alert, so each is
+  // sent once a month.
+  alertedNearMonth String? @db.NVarChar(7)
+  alertedOverMonth String? @db.NVarChar(7)
+
   createdAt DateTime @default(now())
 
   // One standing monthly limit per category per household -- creating a
@@ -287,4 +504,366 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+// One row per CSV import, so the Import page can show when the household
+// last imported and which statement files have already been brought in.
+model ImportBatch {
+  id             String @id @default(uuid())
+  fileName       String @db.NVarChar(255)
+  currency       String
+  rowsInFile     Int    // every data row the CSV contained
+  importedCount  Int    // rows actually inserted as transactions
+  duplicateCount Int    // rows flagged as already in the app (same date + amount)
+
+  // Earliest and latest transaction dates in the file -- the statement period.
+  periodStart DateTime?
+  periodEnd   DateTime?
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, createdAt])
+}
+
+// A Telegram chat linked to a household member, so messages sent to the
+// household's bot become that member's transactions.
+model TelegramLink {
+  id     String @id @default(uuid())
+  chatId String @unique // Telegram's chat id (a number, kept as text)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  createdAt DateTime @default(now())
+}
+
+// A transaction read from a Telegram message, waiting for the person to tap
+// "Add" (or change its card/category, or cancel). Deleted once handled;
+// stale ones are cleared after a couple of days. Ids are plain strings --
+// nothing references this table and it's never the source of truth.
+model PendingTelegramTransaction {
+  id           String   @id @default(uuid())
+  chatId       String
+  householdId  String
+  userId       String
+  amount       Decimal  @db.Decimal(12, 2)
+  currency     String
+  date         DateTime
+  notes        String?  @db.NVarChar(Max)
+  instrumentId String?
+  categoryId   String?
+  createdAt    DateTime @default(now())
+
+  @@index([householdId])
+}
+
+// A brokerage, demat, retirement or crypto account holding investments
+// (Zerodha, Groww, Robinhood, Fidelity 401(k)...). See src/lib/investments.ts.
+model InvestmentAccount {
+  id String @id @default(uuid())
+
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name      String
+  broker    String?
+  country   String  // IN | US | OTHER
+  currency  String  // what its holdings are priced in
+  kind      String  // BROKERAGE | DEMAT | RETIREMENT | MUTUAL_FUND | CRYPTO | OTHER
+  owner     String? // whose account it is
+  loginNote String? @db.NVarChar(Max) // where the login is kept -- never a password
+  notes     String? @db.NVarChar(Max)
+  archived  Boolean @default(false)
+
+  holdings Holding[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([householdId])
+}
+
+// One stock, ETF, fund or coin in an account. Quantity, cost and gains are
+// never stored: they come from its trades (first in, first out).
+model Holding {
+  id String @id @default(uuid())
+
+  accountId String
+  account   InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  symbol    String  // RELIANCE, AAPL, BTC, or an AMFI scheme code for an Indian mutual fund
+  name      String?
+  exchange  String  // NSE | BSE | US | AMFI | CRYPTO | OTHER
+  assetType String  // STOCK | ETF | MUTUAL_FUND | CRYPTO | BOND | OTHER
+  sector    String?
+  currency  String
+
+  // Latest price: fetched (LIVE) or typed in (MANUAL).
+  lastPrice   Decimal?  @db.Decimal(18, 6)
+  lastPriceAt DateTime?
+  priceSource String?
+  notes       String?   @db.NVarChar(Max)
+
+  trades InvestmentTrade[]
+
+  createdAt DateTime @default(now())
+
+  @@index([accountId])
+}
+
+// A buy, a sale or a dividend on a holding.
+model InvestmentTrade {
+  id String @id @default(uuid())
+
+  holdingId String
+  holding   Holding @relation(fields: [holdingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  type     String   // BUY | SELL | DIVIDEND
+  date     DateTime
+  quantity Decimal? @db.Decimal(18, 6) // BUY/SELL
+  price    Decimal? @db.Decimal(18, 6) // per unit, BUY/SELL
+  fees     Decimal? @db.Decimal(12, 2) // brokerage, taxes and charges
+  amount   Decimal? @db.Decimal(14, 2) // DIVIDEND: amount received
+  notes    String?  @db.NVarChar(Max)
+
+  createdAt DateTime @default(now())
+
+  @@index([holdingId])
+}
+
+// Exchange rates fetched with prices (e.g. USDINR), shared by all households.
+model MarketRate {
+  pair      String   @id
+  rate      Decimal  @db.Decimal(18, 6)
+  updatedAt DateTime @updatedAt
+}
+
+// A credit card statement as printed: what it closed at, the minimum and when
+// it's due. Typed in from the statement; the Credit cards page measures
+// payments and new charges from its closing date.
+model CardStatement {
+  id           String            @id @default(uuid())
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  closingDate DateTime
+  balance     Decimal   @db.Decimal(12, 2) // statement ("new") balance; negative = credit balance
+  minimumDue  Decimal?  @db.Decimal(12, 2)
+  dueDate     DateTime?
+  notes       String?   @db.NVarChar(Max)
+
+  createdAt DateTime @default(now())
+
+  @@unique([instrumentId, closingDate])
+}
+
+// The photo of a bill or receipt behind a transaction (one per transaction).
+// Stored downscaled as JPEG, a few hundred KB. Deleted with its transaction:
+// this is the only path into the table, so a cascade is safe on SQL Server.
+model TransactionAttachment {
+  id            String      @id @default(uuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  contentType   String
+  size          Int
+  data          Bytes       @db.VarBinary(Max)
+
+  createdAt DateTime @default(now())
+}
+
+// What a receipt item is, as the household corrected it once ("KS ORG
+// STRAWBERRY" -> Groceries, "MENS JOGGER" -> Clothing), so the next bill
+// sorts it the same way. Removed with its category (the only cascade path).
+model ItemCategoryRule {
+  id          String              @id @default(uuid())
+  householdId String
+  household   Household           @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  itemKey     String              @db.NVarChar(100)
+  categoryId  String
+  category    TransactionCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([householdId, itemKey])
+}
+
+// Money sent to India (a Crobo / Remitly / Wise transfer from a US account):
+// the rupees that arrived and any fee, typed in from the service's receipt,
+// so the rate actually got can be compared with the market rate that day.
+// Deleted with its transaction (the only path into the table).
+model RemittanceDetail {
+  id            String      @id @default(uuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  inrReceived   Decimal     @db.Decimal(14, 2)
+  feeUsd        Decimal?    @db.Decimal(10, 2)
+
+  updatedAt DateTime @updatedAt
+}
+
+// Two transactions the household confirmed are NOT duplicates ("keep
+// both", or added / imported anyway after the warning), so the pair is
+// never raised again on any device. Ids are kept sorted (txnA < txnB); a
+// pair whose transaction is later deleted simply never matches again.
+model DuplicateDecision {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  txnA        String    @db.NVarChar(64)
+  txnB        String    @db.NVarChar(64)
+  createdAt   DateTime  @default(now())
+
+  @@unique([householdId, txnA, txnB])
+}
+
+// A paycheck's hours and pay period, added on the Paychecks page (the
+// Salary transaction is the deposit itself).
+model PaycheckDetail {
+  id            String      @id @default(uuid())
+  transactionId String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  hoursPaid     Decimal?    @db.Decimal(7, 2)
+  periodStart   DateTime?   @db.Date
+  periodEnd     DateTime?   @db.Date
+
+  updatedAt DateTime @updatedAt
+}
+
+// A big cost that doesn't come every month: a yearly premium, a trip to
+// India, school fees, car registration. The Year ahead page turns these into
+// an amount to set aside from each paycheck -- see src/lib/yearAhead.ts.
+model PlannedExpense {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name     String   @db.NVarChar(200)
+  amount   Decimal  @db.Decimal(12, 2)
+  currency String   @default("USD")
+  dueDate  DateTime // the next time it's due; "Mark as paid" moves a repeating one on
+  // Months between repeats (12 = every year, 6, 3); null for a one-time cost.
+  repeatMonths Int?
+  // Where it was added from, so it isn't suggested again and the payday
+  // planner doesn't count it twice: "policy:<id>", "tpl:<id>" or "bill:<key>".
+  sourceKey String? @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId])
+}
+
+// A bank account's balance checked against the bank's own figure: what the
+// bank showed as of a date, and what the app worked out for that date at the
+// time. The latest one is re-tested whenever the accounts are listed, so an
+// edit that moves the balance afterwards shows up -- see src/lib/balanceCheck.ts.
+model BalanceCheck {
+  id           String            @id @default(uuid())
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  asOfDate    DateTime
+  bankBalance Decimal  @db.Decimal(12, 2)
+  appBalance  Decimal  @db.Decimal(12, 2) // the app's figure for that date when checked
+  // True when the bank's figure was then taken as the new starting balance.
+  adjusted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([instrumentId, createdAt])
+}
+
+// Monthly close: an account checked against the bank's (or card's) own
+// figure for a period and closed. Any difference that was accepted is
+// recorded as a balance-adjustment transaction on the account, so it shows
+// in the history rather than disappearing -- see src/lib/periodClose.ts.
+model PeriodClose {
+  id           String            @id @default(uuid())
+  instrumentId String
+  instrument   PaymentInstrument @relation(fields: [instrumentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  periodEnd       DateTime // closed through this day
+  statementFigure Decimal  @db.Decimal(14, 2) // the bank balance, or what the card says is owed, on periodEnd
+  appFigure       Decimal  @db.Decimal(14, 2) // what the app worked out for periodEnd, before any adjustment
+  adjustment      Decimal  @default(0) @db.Decimal(14, 2) // statementFigure - appFigure, when accepted
+  adjustmentTransactionId String? @db.NVarChar(64)
+  note            String?  @db.NVarChar(1000)
+  closedById      String   @db.NVarChar(64)
+  closedByName    String   @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@unique([instrumentId, periodEnd])
+}
+
+// Lent & borrowed: a friend or family member money moves to and from. The
+// balance is never stored: it's the starting balance plus the transactions
+// linked to them (money out adds to what they owe you, money in takes off).
+model LoanContact {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name String @db.NVarChar(200)
+  // Owed before the app's records, approx USD: positive = they owe you.
+  openingBalance Decimal   @default(0) @db.Decimal(14, 2)
+  openingDate    DateTime?
+  phone          String?   @db.NVarChar(50)
+  notes          String?   @db.NVarChar(1000)
+
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([householdId, name])
+}
+
+// Subscriptions (src/lib/subscriptions.ts): what the household decided about
+// each one found in its transactions. `key` is the merchant ("m:NETFLIX").
+// KEEP clears its price-change alert as of `markedAt`; CANCEL flags any
+// charge that arrives after `markedAt`.
+model SubscriptionMark {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  key      String   @db.NVarChar(200)
+  status   String   @db.NVarChar(20) // KEEP | CANCEL
+  amount   Decimal? @db.Decimal(12, 2) // the charge when marked
+  markedAt DateTime @default(now())
+
+  @@unique([householdId, key])
+}
+
+// Money added to (positive) or taken out of (negative) the typed-in
+// emergency fund, approx USD, and which household member put it in (null =
+// joint). Not used when the fund is a bank account named "Emergency...":
+// that account's own transfers and transactions are its history.
+model EmergencyFundEntry {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  date      DateTime
+  amountUsd Decimal  @db.Decimal(12, 2)
+  byUserId  String?
+  byUser    User?    @relation(fields: [byUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  note      String?  @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId, date])
 }
