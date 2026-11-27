@@ -33,6 +33,19 @@ type ExistingMatch = {
   reason: string;
 };
 
+// Recorded on the import account within the statement's dates, but matching
+// none of its lines.
+type NotOnStatement = {
+  id: string;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  categoryName: string;
+  moneyIn: boolean;
+  kind: "TRANSACTION" | "TRANSFER";
+};
+
 type ImportRecord = {
   id: string;
   fileName: string;
@@ -147,6 +160,7 @@ export default function ImportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [notOnStatement, setNotOnStatement] = useState<NotOnStatement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
@@ -284,7 +298,7 @@ export default function ImportPage() {
     }
   }
 
-  async function findExistingMatches(preview: PreviewRow[]): Promise<{ matches: (ExistingMatch | null)[]; otherSides: (OtherSide | null)[] } | null> {
+  async function findExistingMatches(preview: PreviewRow[]): Promise<{ matches: (ExistingMatch | null)[]; otherSides: (OtherSide | null)[]; notOnStatement: NotOnStatement[] } | null> {
     const res = await fetch("/api/transactions/bulk/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -295,7 +309,7 @@ export default function ImportPage() {
     });
     if (!res.ok) return null;
     const body = await res.json();
-    return { matches: body.matches, otherSides: body.otherSides ?? [] };
+    return { matches: body.matches, otherSides: body.otherSides ?? [], notOnStatement: body.notOnStatement ?? [] };
   }
 
   async function suggestCategories(preview: PreviewRow[]): Promise<({ categoryId: string } | null)[] | null> {
@@ -362,6 +376,7 @@ export default function ImportPage() {
     setChecking(true);
     const [checked, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
     const matches = checked?.matches ?? null;
+    setNotOnStatement(checked?.notOnStatement ?? null);
     setChecking(false);
     // Learned suggestions only when they point the right way (money in ->
     // an income category, money out -> an expense one).
@@ -888,6 +903,8 @@ export default function ImportPage() {
             </table>
           </div>
 
+          {notOnStatement && <NotOnStatementList items={notOnStatement} rows={rows} instrumentName={instruments.find((i) => i.id === instrumentId)?.name ?? "this account"} />}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex gap-2">
             <button onClick={() => setStep("map")} className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50">
@@ -905,6 +922,50 @@ export default function ImportPage() {
       )}
 
       {step === "upload" && <ImportHistory history={history} failed={historyError} />}
+    </div>
+  );
+}
+
+// The reverse of the duplicate check: entries in the app for this account
+// during the statement's dates that no statement line accounts for.
+function NotOnStatementList({ items, rows, instrumentName }: { items: NotOnStatement[]; rows: PreviewRow[]; instrumentName: string }) {
+  const dates = rows.map((r) => r.date).sort();
+  return (
+    <div className="rounded-lg border bg-white">
+      <div className="border-b p-3">
+        <h2 className="text-sm font-medium text-gray-700">
+          In the app but not on this statement {items.length > 0 && <span className="text-amber-700">({items.length})</span>}
+        </h2>
+        <p className="text-xs text-gray-400">
+          Recorded on {instrumentName}
+          {dates.length > 0 && ` between ${formatDate(dates[0])} and ${formatDate(dates[dates.length - 1])}`} with no
+          matching statement line — possibly a duplicate, a wrong amount or date, logged to the wrong account, or not
+          posted by the bank yet.
+        </p>
+      </div>
+      {items.length === 0 ? (
+        <p className="p-3 text-sm text-gray-500">None — everything recorded for these dates is on the statement.</p>
+      ) : (
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-sm">
+            <tbody>
+              {items.map((t) => (
+                <tr key={`${t.kind}-${t.id}`} className="border-b last:border-0">
+                  <td className="whitespace-nowrap p-2">{formatDate(t.date)}</td>
+                  <td className="p-2 text-gray-600">
+                    {t.notes || "—"}
+                    <span className="block text-xs text-gray-400">{t.categoryName}</span>
+                  </td>
+                  <td className={`whitespace-nowrap p-2 text-right ${t.moneyIn ? "text-income-600" : ""}`}>
+                    {t.moneyIn ? "+" : ""}
+                    {t.currency} {t.amount.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
