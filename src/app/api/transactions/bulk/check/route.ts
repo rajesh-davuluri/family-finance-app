@@ -148,5 +148,37 @@ export async function POST(req: Request) {
       reason: m.reason,
     };
   });
-  return NextResponse.json({ matches, otherSides });
+  // The reverse check: what's recorded on this account between the
+  // statement's first and last line but matches none of its lines --
+  // possibly a duplicate, a wrong amount or date, or logged to the wrong card.
+  const matchedIds = new Set(found.flatMap((m) => (m ? [m.id] : [])));
+  const inRange = (date: string) => date >= dates[0] && date <= dates[dates.length - 1];
+  const notOnStatement = [
+    ...existing
+      .filter((e) => e.instrumentId === instrumentId && inRange(e.date) && !matchedIds.has(e.id))
+      .map((e) => ({
+        id: e.id,
+        date: e.date,
+        amount: e.amount,
+        currency: e.currency,
+        notes: e.notes,
+        categoryName: e.categoryName,
+        moneyIn: e.moneyIn,
+        kind: "TRANSACTION" as const,
+      })),
+    ...transfers
+      .filter((t) => !usedTransfers.has(t.id) && inRange(t.date.toISOString().slice(0, 10)))
+      .map((t) => ({
+        id: t.id,
+        date: t.date.toISOString().slice(0, 10),
+        amount: Number(t.amount),
+        currency: t.currency,
+        notes: t.notes,
+        categoryName: `Transfer ${t.fromInstrument.name} → ${t.toInstrument.name}`,
+        moneyIn: t.toInstrumentId === instrumentId,
+        kind: "TRANSFER" as const,
+      })),
+  ].sort((a, b) => a.date.localeCompare(b.date));
+
+  return NextResponse.json({ matches, otherSides, notOnStatement });
 }
