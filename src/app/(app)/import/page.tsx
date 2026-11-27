@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { parseStatementLines } from "@/lib/statementParse";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 import { useSession } from "next-auth/react";
-import { accountPattern, classifyBankLine, moneyInSign, stripCsvPreamble } from "@/lib/bankRules";
+import { accountPattern, classifyBankLine, moneyInSign } from "@/lib/bankRules";
 import { NewCategory, ruleOverridesHistory, targetForRule } from "@/lib/importRules";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; effectiveKind?: string };
@@ -211,36 +210,13 @@ export default function ImportPage() {
     setPdfLocked(null);
     const fileCurrency = await ensureOptionsLoaded();
 
-    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-      await readPdf(file, fileCurrency);
+    // Card and bank statements come as PDFs -- nothing else is accepted.
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Only PDF statements can be imported. Download the statement as a PDF from your bank or card website.");
+      e.target.value = "";
       return;
     }
-
-    // Bank downloads often start with summary lines before the real header.
-    const text = stripCsvPreamble(await file.text());
-    Papa.parse<Record<string, string>>(text, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (!results.data.length) {
-          setError("Couldn't find any rows in that file.");
-          return;
-        }
-        setHeaders(results.meta.fields ?? []);
-        setRawRows(results.data);
-        // Best-effort guess at column mapping so the person usually just
-        // has to confirm rather than pick from scratch.
-        const guess = (candidates: string[]) =>
-          results.meta.fields?.find((f) => candidates.some((c) => f.toLowerCase().includes(c))) ?? "";
-        setColumnMap({
-          date: guess(["date"]),
-          description: guess(["description", "memo", "payee", "merchant"]),
-          amount: guess(["amount"]),
-        });
-        setStep("map");
-      },
-      error: () => setError("Couldn't read that file — make sure it's a valid CSV."),
-    });
+    await readPdf(file, fileCurrency);
   }
 
   // PDF statements are read in the browser: text lines -> transactions ->
@@ -265,7 +241,7 @@ export default function ImportPage() {
 
       if (lines.join("").trim().length === 0) {
         setError(
-          "This PDF has no readable text — it's probably a scanned image. Download the statement as CSV, or as a regular (text) PDF, from your bank's website."
+          "This PDF has no readable text — it's probably a scanned image. Download the statement as a regular (text) PDF from your bank's website."
         );
         return;
       }
@@ -273,7 +249,7 @@ export default function ImportPage() {
       const found = parseStatementLines(lines, { monthFirstByDefault: fileCurrency === "USD", today: new Date() });
       if (found.length === 0) {
         setError(
-          "Couldn't find any transactions in this PDF — its layout wasn't recognised. Try the CSV download from your bank instead."
+          "Couldn't find any transactions in this PDF — its layout wasn't recognised."
         );
         return;
       }
@@ -302,7 +278,7 @@ export default function ImportPage() {
       setStep("map");
     } catch (err) {
       console.error("PDF import failed:", err);
-      setError("Couldn't read that PDF. If it opens normally on your computer, try the CSV download from your bank instead.");
+      setError("Couldn't read that PDF. Make sure it opens normally on your computer and try again.");
     } finally {
       setReadingPdf(false);
     }
@@ -546,7 +522,7 @@ export default function ImportPage() {
       <div>
         <h1 className="text-xl font-semibold">Import transactions</h1>
         <p className="text-sm text-gray-500">
-          Upload a CSV export or PDF statement from your bank or card — check the columns, assign categories, and import
+          Upload a PDF statement from your bank or card — check the columns, assign categories, and import
           in bulk instead of entering rows one at a time.
         </p>
       </div>
@@ -588,13 +564,13 @@ export default function ImportPage() {
         <div className="rounded-lg border bg-white p-6 text-center">
           <input
             type="file"
-            accept=".csv,.pdf,text/csv,application/pdf"
+            accept=".pdf,application/pdf"
             onChange={handleFile}
             disabled={readingPdf}
             className="mx-auto text-sm"
           />
           <p className="mt-2 text-xs text-gray-400">
-            CSV (with a header row) or PDF statement. PDFs are read on this device — the file isn&apos;t uploaded.
+            PDF statements only. PDFs are read on this device — the file isn&apos;t uploaded.
           </p>
           {readingPdf && <p className="mt-3 text-sm text-gray-500">Reading the PDF...</p>}
           {pdfLocked && (
