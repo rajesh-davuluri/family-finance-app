@@ -126,6 +126,10 @@ export default function AddTransactionModal({
   // Paid part of the price with card rewards or cashback: how much.
   const [rewardsOpen, setRewardsOpen] = useState(false);
   const [rewards, setRewards] = useState("");
+  // "Save & add another": keep the form open after saving, and what was saved.
+  const keepOpen = useRef(false);
+  const amountRef = useRef<HTMLInputElement>(null);
+  const [added, setAdded] = useState<{ text: string; n: number } | null>(null);
   // A new purchase's return window (optional).
   const [returnByOpen, setReturnByOpen] = useState(false);
   const [returnBy, setReturnBy] = useState("");
@@ -302,6 +306,8 @@ export default function AddTransactionModal({
     setRewards(amountToInput(r, editingTransaction?.currency));
     setReturnByOpen(false);
     setReturnBy("");
+    setAdded(null);
+    keepOpen.current = false;
     setRewardsOpen(r > 0);
     if (linked && people === null)
       fetch("/api/lent/names")
@@ -372,11 +378,29 @@ export default function AddTransactionModal({
     if (!res.ok) return setError(typeof body?.error === "string" ? body.error : "Couldn't save that.");
     if (isEditing) return onSuccess();
     if (body?.person?.created) setPeople((old) => [...(old ?? []), { id: body.person.id, name: body.person.name }]);
+    const what = savedWhat();
     setForm((f) => ({ ...f, amount: "", notes: "" }));
     setPerson("");
     setPhone("");
-    onSuccess();
+    finish(what);
   }
+
+  // After a new transaction is saved: close as before, or -- "Save & add
+  // another" -- stay open for the next one (account, category, date and
+  // type kept), with what was saved shown at the top.
+  function finish(what: string) {
+    if (isEditing || !keepOpen.current) return onSuccess();
+    keepOpen.current = false;
+    window.dispatchEvent(new Event(TRANSACTIONS_CHANGED));
+    setAdded((a) => ({ text: what, n: (a?.n ?? 0) + 1 }));
+    setError(null);
+    requestAnimationFrame(() => amountRef.current?.focus());
+  }
+  const savedWhat = () => {
+    const inst = instruments.find((i) => i.id === form.instrumentId)?.name;
+    const cat = loanType ? LOAN_TYPES.find((t) => t.type === loanType)?.label : categories.find((c) => c.id === form.categoryId)?.name;
+    return [money(parseAmount(form.amount) || 0, form.currency), loanType ? `${cat} · ${person.trim()}` : cat, inst].filter(Boolean).join(" · ");
+  };
 
   async function handleSubmit(e: React.FormEvent, allowDuplicate = false) {
     e.preventDefault();
@@ -431,6 +455,7 @@ export default function AddTransactionModal({
     const saved = await res.json().catch(() => null);
     const photoError = saved?.id ? await savePhoto(saved.id) : null;
     if (photoError) window.alert(`The transaction was saved, but ${photoError}. Open it and attach the photo again.`);
+    const what = savedWhat();
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
     if (!isEditing) {
       setRewards("");
@@ -441,7 +466,7 @@ export default function AddTransactionModal({
     setNewPhoto(null);
     setScanNote(null);
     setDuplicate(null);
-    onSuccess();
+    finish(what);
   }
 
   // Save the bill split by category: a new bill, or this transaction split.
@@ -481,13 +506,14 @@ export default function AddTransactionModal({
     }
     const photoError = body?.primaryId ? await savePhoto(body.primaryId) : null;
     if (photoError) window.alert(`The bill was saved, but ${photoError}. Open it and attach the photo again.`);
+    const what = `${savedWhat().split(" · ")[0]} · split across ${split!.parts.length}`;
     if (!isEditing) setForm((f) => ({ ...f, amount: "", notes: "" }));
     setNewPhoto(null);
     setScanNote(null);
     setReceiptItems(null);
     setSplit(null);
     setDuplicate(null);
-    onSuccess();
+    finish(what);
   }
 
   if (!open) return null;
@@ -513,6 +539,12 @@ export default function AddTransactionModal({
           </button>
         </div>
 
+        {added && (
+          <p className="mb-3 rounded-md bg-green-50 px-3 py-2 text-sm text-income-600" role="status">
+            ✓ Saved {added.text}
+            {added.n > 1 && <span className="text-gray-500"> · {added.n} added</span>}. Add the next one, or close when done.
+          </p>
+        )}
         {loading ? (
           <p className="text-sm text-gray-400">Loading...</p>
         ) : (
@@ -676,6 +708,7 @@ export default function AddTransactionModal({
                 required
                 // Straight to the amount with a keyboard; on a touch screen the keyboard would cover the Scan button.
                 autoFocus={!isEditing && typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches}
+                ref={amountRef}
                 placeholder="0.00"
                 aria-label="Amount"
                 onFocus={caretToEnd}
@@ -905,10 +938,21 @@ export default function AddTransactionModal({
                 <button
                   type="submit"
                   disabled={submitting || noSetupYet || !!scan}
+                  onClick={() => (keepOpen.current = false)}
                   className="flex-1 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:flex-none sm:py-2"
                 >
-                  {submitting ? "Saving..." : splitOn ? `Save as ${split!.parts.length} parts` : isEditing ? "Save Changes" : "Add Transaction"}
+                  {submitting ? "Saving..." : splitOn ? `Save as ${split!.parts.length} parts` : isEditing ? "Save Changes" : "Save"}
                 </button>
+                {!isEditing && (
+                  <button
+                    type="submit"
+                    disabled={submitting || noSetupYet || !!scan}
+                    onClick={() => (keepOpen.current = true)}
+                    className="rounded-md border border-brand-500 px-3 py-2.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50 sm:py-2"
+                  >
+                    Save &amp; add another
+                  </button>
+                )}
               </div>
             </form>
           </>
