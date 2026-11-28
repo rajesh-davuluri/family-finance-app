@@ -941,7 +941,7 @@ export default function AddTransactionModal({
                   onClick={() => (keepOpen.current = false)}
                   className="flex-1 rounded-md bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 sm:flex-none sm:py-2"
                 >
-                  {submitting ? "Saving..." : splitOn ? `Save as ${split!.parts.length} parts` : isEditing ? "Save Changes" : "Add Transaction"}
+                  {submitting ? "Saving..." : splitOn ? `Save as ${split!.parts.length} parts` : isEditing ? "Save Changes" : "Save"}
                 </button>
                 {!isEditing && (
                   <button
