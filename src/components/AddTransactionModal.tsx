@@ -13,7 +13,7 @@ import ReturnPanel from "@/components/ReturnPanel";
 import { TRANSACTIONS_CHANGED } from "@/lib/events";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE" };
-type Instrument = { id: string; name: string; currency: string; archived: boolean };
+type Instrument = { id: string; name: string; currency: string; archived: boolean; type?: string };
 type DuplicateInfo = {
   id: string;
   date: string;
@@ -130,6 +130,11 @@ export default function AddTransactionModal({
   const keepOpen = useRef(false);
   const amountRef = useRef<HTMLInputElement>(null);
   const [added, setAdded] = useState<{ text: string; n: number } | null>(null);
+  // Transfer between the household's own accounts (a card payment when the
+  // money goes to a card): the account it goes to, and a same-day twin found.
+  const [transfer, setTransfer] = useState(false);
+  const [toId, setToId] = useState("");
+  const [transferDup, setTransferDup] = useState<{ date: string; amount: number; notes: string | null } | null>(null);
   // A new purchase's return window (optional).
   const [returnByOpen, setReturnByOpen] = useState(false);
   const [returnBy, setReturnBy] = useState("");
@@ -308,6 +313,9 @@ export default function AddTransactionModal({
     setReturnBy("");
     setAdded(null);
     keepOpen.current = false;
+    setTransfer(false);
+    setToId("");
+    setTransferDup(null);
     setRewardsOpen(r > 0);
     if (linked && people === null)
       fetch("/api/lent/names")
@@ -385,6 +393,37 @@ export default function AddTransactionModal({
     finish(what);
   }
 
+  async function submitTransfer(allowDuplicate: boolean) {
+    setError(null);
+    const from = instruments.find((i) => i.id === form.instrumentId);
+    const to = instruments.find((i) => i.id === toId);
+    if (!from || !to) return setError("Choose the account the money came from and the one it went to.");
+    if (from.id === to.id) return setError("Choose two different accounts.");
+    if (from.currency !== to.currency) return setError(`${from.name} is in ${from.currency} and ${to.name} in ${to.currency}: record money sent to India on Money to India.`);
+    setSubmitting(true);
+    setTransferDup(null);
+    const res = await fetch("/api/transfers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromInstrumentId: from.id,
+        toInstrumentId: to.id,
+        amount: parseAmount(form.amount),
+        currency: from.currency,
+        date: form.date,
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+        ...(allowDuplicate ? { allowDuplicate: true } : {}),
+      }),
+    });
+    setSubmitting(false);
+    const body = await res.json().catch(() => null);
+    if (res.status === 409 && body?.duplicate) return setTransferDup(body.duplicate);
+    if (!res.ok) return setError(typeof body?.error === "string" ? body.error : "Couldn't save the transfer.");
+    const what = `${money(parseAmount(form.amount), from.currency)} · ${from.name} → ${to.name}${to.type === "CREDIT_CARD" ? " (card payment)" : ""}`;
+    setForm((f) => ({ ...f, amount: "", notes: "" }));
+    finish(what);
+  }
+
   // After a new transaction is saved: close as before, or -- "Save & add
   // another" -- stay open for the next one (account, category, date and
   // type kept), with what was saved shown at the top.
@@ -408,6 +447,7 @@ export default function AddTransactionModal({
       setError("Enter the amount.");
       return;
     }
+    if (transfer) return submitTransfer(allowDuplicate);
     if (loanType) return submitLoan();
     // "Add anyway" after the warning: the transaction it looked like.
     const notDuplicateOf = allowDuplicate ? duplicate?.id : undefined;
@@ -569,27 +609,39 @@ export default function AddTransactionModal({
               <div className="mb-3">
                 <p className="mb-1 text-xs font-medium text-gray-500">Type</p>
                 <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Type">
-                  {[{ type: null, label: "Spending / income" }, ...LOAN_TYPES].map((o) => (
-                    <button
-                      key={o.label}
-                      type="button"
-                      role="radio"
-                      aria-checked={loanType === o.type}
-                      onClick={() => chooseLoanType(o.type)}
-                      className={`min-h-[36px] rounded-full border px-3 text-xs font-medium ${loanType === o.type ? "border-ink-900 bg-ink-900 text-white" : "text-gray-700 hover:bg-gray-50"}`}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
+                  {[{ type: null as LoanType | null, label: "Spending / income", xfer: false }, ...LOAN_TYPES.map((t) => ({ ...t, xfer: false })), ...(isEditing ? [] : [{ type: null, label: "Transfer", xfer: true }])].map((o) => {
+                    const on = o.xfer ? transfer : !transfer && loanType === o.type;
+                    return (
+                      <button
+                        key={o.label}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => {
+                          setTransfer(o.xfer);
+                          setTransferDup(null);
+                          chooseLoanType(o.type);
+                        }}
+                        className={`min-h-[36px] rounded-full border px-3 text-xs font-medium ${on ? "border-ink-900 bg-ink-900 text-white" : "text-gray-700 hover:bg-gray-50"}`}
+                      >
+                        {o.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 {loanType && (
                   <p className="mt-1.5 text-xs text-gray-500">
                     {LOAN_TYPES.find((t) => t.type === loanType)!.hint} Shows on Lent &amp; borrowed; not counted as income or spending.
                   </p>
                 )}
+                {transfer && (
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Money moved between your own accounts: both balances change; not counted as income or spending.
+                  </p>
+                )}
               </div>
             )}
-            {!noSetupYet && !loanType && (
+            {!noSetupYet && !loanType && !transfer && (
               <div className="mb-3 space-y-2">
                 {!isEditing && !photoUrl && !scan && (
                   <button
@@ -731,7 +783,7 @@ export default function AddTransactionModal({
                   </option>
                 ))}
               </select>
-              {!loanType && !splitOn && isExpense && (
+              {!loanType && !transfer && !splitOn && isExpense && (
                 <div className="sm:col-span-2">
                   {!rewardsOpen ? (
                     <button type="button" onClick={() => setRewardsOpen(true)} className="text-xs font-medium text-brand-700 hover:underline">
@@ -815,7 +867,7 @@ export default function AddTransactionModal({
               <select
                 value={form.categoryId}
                 onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${splitOn || loanType ? "hidden" : ""}`}
+                className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${splitOn || loanType || transfer ? "hidden" : ""}`}
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -834,7 +886,7 @@ export default function AddTransactionModal({
                 }}
                 className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${form.instrumentId ? "" : "text-gray-500"}`}
               >
-                <option value="">Choose account or card…</option>
+                <option value="">{transfer ? "From account…" : "Choose account or card…"}</option>
                 {instruments
                   .filter((i) => !i.archived || i.id === editingTransaction?.instrumentId)
                   .map((i) => (
@@ -844,6 +896,43 @@ export default function AddTransactionModal({
                     </option>
                   ))}
               </select>
+              {transfer && (() => {
+                const from = instruments.find((i) => i.id === form.instrumentId);
+                const to = instruments.find((i) => i.id === toId);
+                return (
+                  <>
+                    <select
+                      aria-label="To account"
+                      value={toId}
+                      onChange={(e) => {
+                        setToId(e.target.value);
+                        setTransferDup(null);
+                      }}
+                      className={`rounded-md border px-3 py-2 text-sm sm:col-span-2 ${toId ? "" : "text-gray-500"}`}
+                    >
+                      <option value="">To account or card…</option>
+                      {instruments
+                        .filter((i) => !i.archived && i.id !== form.instrumentId)
+                        .map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.name}
+                          </option>
+                        ))}
+                    </select>
+                    {from && to && from.currency !== to.currency ? (
+                      <p className="text-xs text-expense-600 sm:col-span-2">
+                        {from.name} is in {from.currency}, {to.name} in {to.currency}. Money sent to India goes on{" "}
+                        <a href="/remittances" className="underline">
+                          Money to India
+                        </a>
+                        , with what arrived and the rate.
+                      </p>
+                    ) : to?.type === "CREDIT_CARD" ? (
+                      <p className="text-xs text-gray-500 sm:col-span-2">Paying the {to.name} card bill: counts as a card payment, like Mark paid.</p>
+                    ) : null}
+                  </>
+                );
+              })()}
               <input
                 type="date"
                 required
@@ -858,7 +947,7 @@ export default function AddTransactionModal({
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 className="rounded-md border px-3 py-2 text-sm"
               />
-              {!isEditing && !loanType && !splitOn && isExpense && (
+              {!isEditing && !loanType && !transfer && !splitOn && isExpense && (
                 <div className="sm:col-span-2">
                   {!returnByOpen ? (
                     <button type="button" onClick={() => setReturnByOpen(true)} className="text-xs font-medium text-brand-700 hover:underline">
@@ -887,6 +976,23 @@ export default function AddTransactionModal({
                 />
               )}
               {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
+              {transferDup && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-2" role="alert">
+                  <p className="font-medium">A transfer like this is already recorded:</p>
+                  <p className="mt-1">
+                    {formatDate(transferDup.date)} · {money(transferDup.amount, form.currency)}
+                    {transferDup.notes ? ` · “${transferDup.notes}”` : ""}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={() => submitTransfer(true)} className="rounded-md border border-amber-400 bg-white px-3 py-1 text-xs hover:bg-amber-100">
+                      Add anyway
+                    </button>
+                    <button type="button" onClick={() => setTransferDup(null)} className="rounded-md px-3 py-1 text-xs text-amber-900 hover:underline">
+                      Don&rsquo;t add
+                    </button>
+                  </div>
+                </div>
+              )}
               {duplicate && (
                 <div
                   className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:col-span-2"
