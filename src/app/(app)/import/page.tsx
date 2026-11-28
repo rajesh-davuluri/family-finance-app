@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Papa from "papaparse";
 import { CURRENCIES } from "@/lib/enums";
 import { formatDate, getTodayLocal } from "@/lib/formatDate";
 import { parseStatementLines } from "@/lib/statementParse";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import { LastActivity, STALE_AFTER_DAYS, daysSince, formatDateTime } from "@/lib/lastActivity";
 import { useSession } from "next-auth/react";
-import { accountPattern, classifyBankLine, moneyInSign, stripCsvPreamble } from "@/lib/bankRules";
+import { accountPattern, classifyBankLine, moneyInSign } from "@/lib/bankRules";
 import { NewCategory, ruleOverridesHistory, targetForRule } from "@/lib/importRules";
 
 type Category = { id: string; name: string; direction: "INCOME" | "EXPENSE"; effectiveKind?: string };
@@ -32,6 +31,19 @@ type ExistingMatch = {
   confidence: "HIGH" | "MEDIUM";
   daysApart: number;
   reason: string;
+};
+
+// Recorded on the import account within the statement's dates, but matching
+// none of its lines.
+type NotOnStatement = {
+  id: string;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  categoryName: string;
+  moneyIn: boolean;
+  kind: "TRANSACTION" | "TRANSFER";
 };
 
 type ImportRecord = {
@@ -148,6 +160,7 @@ export default function ImportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [notOnStatement, setNotOnStatement] = useState<NotOnStatement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
@@ -211,36 +224,13 @@ export default function ImportPage() {
     setPdfLocked(null);
     const fileCurrency = await ensureOptionsLoaded();
 
-    if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-      await readPdf(file, fileCurrency);
+    // Card and bank statements come as PDFs -- nothing else is accepted.
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Only PDF statements can be imported. Download the statement as a PDF from your bank or card website.");
+      e.target.value = "";
       return;
     }
-
-    // Bank downloads often start with summary lines before the real header.
-    const text = stripCsvPreamble(await file.text());
-    Papa.parse<Record<string, string>>(text, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (!results.data.length) {
-          setError("Couldn't find any rows in that file.");
-          return;
-        }
-        setHeaders(results.meta.fields ?? []);
-        setRawRows(results.data);
-        // Best-effort guess at column mapping so the person usually just
-        // has to confirm rather than pick from scratch.
-        const guess = (candidates: string[]) =>
-          results.meta.fields?.find((f) => candidates.some((c) => f.toLowerCase().includes(c))) ?? "";
-        setColumnMap({
-          date: guess(["date"]),
-          description: guess(["description", "memo", "payee", "merchant"]),
-          amount: guess(["amount"]),
-        });
-        setStep("map");
-      },
-      error: () => setError("Couldn't read that file — make sure it's a valid CSV."),
-    });
+    await readPdf(file, fileCurrency);
   }
 
   // PDF statements are read in the browser: text lines -> transactions ->
@@ -265,7 +255,7 @@ export default function ImportPage() {
 
       if (lines.join("").trim().length === 0) {
         setError(
-          "This PDF has no readable text — it's probably a scanned image. Download the statement as CSV, or as a regular (text) PDF, from your bank's website."
+          "This PDF has no readable text — it's probably a scanned image. Download the statement as a regular (text) PDF from your bank's website."
         );
         return;
       }
@@ -273,7 +263,7 @@ export default function ImportPage() {
       const found = parseStatementLines(lines, { monthFirstByDefault: fileCurrency === "USD", today: new Date() });
       if (found.length === 0) {
         setError(
-          "Couldn't find any transactions in this PDF — its layout wasn't recognised. Try the CSV download from your bank instead."
+          "Couldn't find any transactions in this PDF — its layout wasn't recognised."
         );
         return;
       }
@@ -302,13 +292,13 @@ export default function ImportPage() {
       setStep("map");
     } catch (err) {
       console.error("PDF import failed:", err);
-      setError("Couldn't read that PDF. If it opens normally on your computer, try the CSV download from your bank instead.");
+      setError("Couldn't read that PDF. Make sure it opens normally on your computer and try again.");
     } finally {
       setReadingPdf(false);
     }
   }
 
-  async function findExistingMatches(preview: PreviewRow[]): Promise<{ matches: (ExistingMatch | null)[]; otherSides: (OtherSide | null)[] } | null> {
+  async function findExistingMatches(preview: PreviewRow[]): Promise<{ matches: (ExistingMatch | null)[]; otherSides: (OtherSide | null)[]; notOnStatement: NotOnStatement[] } | null> {
     const res = await fetch("/api/transactions/bulk/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -319,7 +309,7 @@ export default function ImportPage() {
     });
     if (!res.ok) return null;
     const body = await res.json();
-    return { matches: body.matches, otherSides: body.otherSides ?? [] };
+    return { matches: body.matches, otherSides: body.otherSides ?? [], notOnStatement: body.notOnStatement ?? [] };
   }
 
   async function suggestCategories(preview: PreviewRow[]): Promise<({ categoryId: string } | null)[] | null> {
@@ -386,6 +376,7 @@ export default function ImportPage() {
     setChecking(true);
     const [checked, suggestions] = await Promise.all([findExistingMatches(preview), suggestCategories(preview)]);
     const matches = checked?.matches ?? null;
+    setNotOnStatement(checked?.notOnStatement ?? null);
     setChecking(false);
     // Learned suggestions only when they point the right way (money in ->
     // an income category, money out -> an expense one).
@@ -546,7 +537,7 @@ export default function ImportPage() {
       <div>
         <h1 className="text-xl font-semibold">Import transactions</h1>
         <p className="text-sm text-gray-500">
-          Upload a CSV export or PDF statement from your bank or card — check the columns, assign categories, and import
+          Upload a PDF statement from your bank or card — check the columns, assign categories, and import
           in bulk instead of entering rows one at a time.
         </p>
       </div>
@@ -588,13 +579,13 @@ export default function ImportPage() {
         <div className="rounded-lg border bg-white p-6 text-center">
           <input
             type="file"
-            accept=".csv,.pdf,text/csv,application/pdf"
+            accept=".pdf,application/pdf"
             onChange={handleFile}
             disabled={readingPdf}
             className="mx-auto text-sm"
           />
           <p className="mt-2 text-xs text-gray-400">
-            CSV (with a header row) or PDF statement. PDFs are read on this device — the file isn&apos;t uploaded.
+            PDF statements only. PDFs are read on this device — the file isn&apos;t uploaded.
           </p>
           {readingPdf && <p className="mt-3 text-sm text-gray-500">Reading the PDF...</p>}
           {pdfLocked && (
@@ -912,6 +903,8 @@ export default function ImportPage() {
             </table>
           </div>
 
+          {notOnStatement && <NotOnStatementList items={notOnStatement} rows={rows} instrumentName={instruments.find((i) => i.id === instrumentId)?.name ?? "this account"} />}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex gap-2">
             <button onClick={() => setStep("map")} className="rounded-md border px-4 py-2 text-sm hover:bg-gray-50">
@@ -929,6 +922,50 @@ export default function ImportPage() {
       )}
 
       {step === "upload" && <ImportHistory history={history} failed={historyError} />}
+    </div>
+  );
+}
+
+// The reverse of the duplicate check: entries in the app for this account
+// during the statement's dates that no statement line accounts for.
+function NotOnStatementList({ items, rows, instrumentName }: { items: NotOnStatement[]; rows: PreviewRow[]; instrumentName: string }) {
+  const dates = rows.map((r) => r.date).sort();
+  return (
+    <div className="rounded-lg border bg-white">
+      <div className="border-b p-3">
+        <h2 className="text-sm font-medium text-gray-700">
+          In the app but not on this statement {items.length > 0 && <span className="text-amber-700">({items.length})</span>}
+        </h2>
+        <p className="text-xs text-gray-400">
+          Recorded on {instrumentName}
+          {dates.length > 0 && ` between ${formatDate(dates[0])} and ${formatDate(dates[dates.length - 1])}`} with no
+          matching statement line — possibly a duplicate, a wrong amount or date, logged to the wrong account, or not
+          posted by the bank yet.
+        </p>
+      </div>
+      {items.length === 0 ? (
+        <p className="p-3 text-sm text-gray-500">None — everything recorded for these dates is on the statement.</p>
+      ) : (
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-sm">
+            <tbody>
+              {items.map((t) => (
+                <tr key={`${t.kind}-${t.id}`} className="border-b last:border-0">
+                  <td className="whitespace-nowrap p-2">{formatDate(t.date)}</td>
+                  <td className="p-2 text-gray-600">
+                    {t.notes || "—"}
+                    <span className="block text-xs text-gray-400">{t.categoryName}</span>
+                  </td>
+                  <td className={`whitespace-nowrap p-2 text-right ${t.moneyIn ? "text-income-600" : ""}`}>
+                    {t.moneyIn ? "+" : ""}
+                    {t.currency} {t.amount.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
