@@ -16,7 +16,7 @@ import type { CloseAccount } from "@/lib/periodCloseData";
 
 type Data = { today: string; toleranceUsd: number; accounts: CloseAccount[] };
 type Result =
-  | { status: "CLOSED"; asOfDate: string; figure: number; app: number; diff: number; adjustment: number }
+  | { status: "CLOSED"; asOfDate: string; figure: number; app: number; diff: number; adjustment: number; inTransit?: string }
   | { status: "OFF"; asOfDate: string; figure: number; app: number; diff: number; within: boolean; toleranceUsd: number; hints: Hint[] };
 
 const day = (d: string) => formatDate(d, { month: "short", day: "numeric", year: "numeric" });
@@ -185,7 +185,7 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
         {a.latest && (
           <p className="text-gray-600">
             Last closed through <b>{day(a.latest.periodEnd)}</b> by {a.latest.closedByName} on {when(a.latest.closedAt)}
-            {a.latest.adjustment !== 0 && <> with a {money(a.latest.adjustment, a.currency)} adjustment</>}.
+            {a.latest.adjustment !== 0 && (a.latest.inTransit ? <> with {money(Math.abs(a.latest.adjustment), a.currency)} in transit (posted after the date)</> : <> with a {money(a.latest.adjustment, a.currency)} adjustment</>)}.
           </p>
         )}
         {a.status === "CHANGED" && a.latest && (
@@ -240,7 +240,11 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
             {result?.status === "CLOSED" && (
               <p className="rounded-md bg-green-50 px-3 py-2 text-income-600">
                 ✓ Closed through {day(result.asOfDate)}
-                {result.adjustment !== 0 ? ` with a ${money(result.adjustment, a.currency)} balance adjustment recorded.` : `: the app and the ${card ? "card" : "bank"} both say ${money(result.figure, a.currency)}.`}
+                {result.inTransit
+                  ? `. ${result.inTransit} No adjustment needed.`
+                  : result.adjustment !== 0
+                    ? ` with a ${money(result.adjustment, a.currency)} balance adjustment recorded.`
+                    : `: the app and the ${card ? "card" : "bank"} both say ${money(result.figure, a.currency)}.`}
               </p>
             )}
 
@@ -306,7 +310,7 @@ function AccountClose({ account: a, today, onChanged }: { account: CloseAccount;
                     </td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{money(h.statementFigure, a.currency)}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{money(h.appFigure, a.currency)}</td>
-                    <td className={`py-1.5 pr-2 text-right tabular-nums ${h.adjustment !== 0 ? "font-medium" : "text-gray-400"}`}>{h.adjustment !== 0 ? money(h.adjustment, a.currency) : "—"}</td>
+                    <td className={`py-1.5 pr-2 text-right tabular-nums ${h.adjustment !== 0 && !h.inTransit ? "font-medium" : "text-gray-400"}`}>{h.inTransit ? "in transit" : h.adjustment !== 0 ? money(h.adjustment, a.currency) : "—"}</td>
                     <td className="py-1.5 pr-2 text-gray-500">
                       {h.closedByName}, {when(h.closedAt)}
                     </td>

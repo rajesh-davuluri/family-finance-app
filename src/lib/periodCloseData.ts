@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { toApproxUsd } from "@/lib/fx";
 import { loadCards } from "@/lib/cardData";
 import { balanceItems, computeInstrumentBalance } from "@/lib/balanceCalculations";
-import { findCauses, isMatch, type Hint } from "@/lib/balanceCheck";
+import { findCauses, inTransit, transitText, type Hint } from "@/lib/balanceCheck";
+import { money } from "@/lib/money";
 import { cardCheckItems, cardCheckSince, cardsOwedOn } from "@/lib/cardCheckData";
 import { addDays } from "@/lib/cards";
 import { ADJUSTMENT_CATEGORY, DEFAULT_TOLERANCE_USD, closeStatus, lastMonthEnd, periodLabel, type AccountKind, type CloseStatus } from "@/lib/periodClose";
@@ -48,6 +49,17 @@ export async function closeCauses(inst: PaymentInstrument, date: string, diff: n
   return findCauses({ diff, items: await balanceItems(inst.id, new Date(`${opening}T00:00:00Z`)), since, asOf: date });
 }
 
+// A difference that's only entries made just before the date and posted
+// after it: what to say about it, or null.
+export async function closeTransit(inst: PaymentInstrument, date: string, diff: number, periodStart: string | null): Promise<string | null> {
+  const card = kindOfAccount(inst) === "CARD";
+  const opening = card ? null : day(inst.openingBalanceDate!);
+  const since = card ? (periodStart && periodStart > cardCheckSince(date) ? periodStart : cardCheckSince(date)) : periodStart && periodStart > opening! ? periodStart : opening!;
+  const items = card ? await cardCheckItems(inst.id, inst.currency, since, date) : (await balanceItems(inst.id, new Date(`${opening}T00:00:00Z`))).filter((i) => i.date >= since);
+  const t = inTransit({ diff, items, asOf: date });
+  return t ? transitText(t, (n) => money(n, inst.currency), card) : null;
+}
+
 // The category a balance adjustment is recorded in: one each way, made on
 // first use. They count as neither income nor spending (kind TRANSFER).
 export async function adjustmentCategoryId(householdId: string, direction: "INCOME" | "EXPENSE"): Promise<string> {
@@ -65,6 +77,9 @@ export type CloseRow = {
   statementFigure: number;
   appFigure: number;
   adjustment: number;
+  // Closed with entries still in transit: `adjustment` is that gap, and no
+  // adjustment transaction was recorded -- the entries will post.
+  inTransit: boolean;
   note: string | null;
   closedByName: string;
   closedAt: string;
@@ -118,6 +133,7 @@ export async function loadCloseOverview(householdId: string, today: string): Pro
       statementFigure: Number(c.statementFigure),
       appFigure: Number(c.appFigure),
       adjustment: Number(c.adjustment),
+      inTransit: Number(c.adjustment) !== 0 && !c.adjustmentTransactionId,
       note: c.note,
       closedByName: c.closedByName,
       closedAt: c.createdAt.toISOString(),
@@ -126,14 +142,16 @@ export async function loadCloseOverview(householdId: string, today: string): Pro
     let latest: CloseAccount["latest"] = null;
     if (rows[0]) {
       const appNow = reason ? null : await appFigureOn(householdId, inst, rows[0].periodEnd, kind === "CARD" ? await owedOn(rows[0].periodEnd) : undefined);
-      latest = { ...rows[0], appNow, offNow: appNow == null ? 0 : r2(rows[0].statementFigure - appNow) };
+      // An in-transit gap is expected: only what's beyond it counts as off.
+      const expected = rows[0].inTransit ? rows[0].adjustment : 0;
+      latest = { ...rows[0], appNow, offNow: appNow == null ? 0 : r2(rows[0].statementFigure - appNow - expected) };
     }
     const opening = inst.openingBalanceDate ? day(inst.openingBalanceDate) : null;
     const status = closeStatus({
       available: !reason,
       dueEnd,
       startsAfterDue: kind === "BANK" && !!opening && !!dueEnd && opening > dueEnd,
-      latest: latest ? { periodEnd: latest.periodEnd, stillMatches: latest.appNow == null || isMatch(latest.statementFigure, latest.appNow) } : null,
+      latest: latest ? { periodEnd: latest.periodEnd, stillMatches: latest.appNow == null || Math.abs(latest.offNow) < 0.005 } : null,
     });
     accounts.push({
       id: inst.id,

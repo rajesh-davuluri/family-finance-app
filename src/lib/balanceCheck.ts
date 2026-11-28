@@ -8,7 +8,7 @@
 export type CheckItem = { id: string; kind: "TRANSACTION" | "TRANSFER"; date: string; label: string; notes: string | null; amount: number }; // signed: money in positive
 
 export type Hint = {
-  kind: "EXTRA" | "DUPLICATE" | "WRONG_WAY" | "START_DAY" | "MISSING" | "GAP" | "SWAPPED";
+  kind: "IN_TRANSIT" | "EXTRA" | "DUPLICATE" | "WRONG_WAY" | "START_DAY" | "MISSING" | "GAP" | "SWAPPED";
   text: string;
   items?: CheckItem[];
   // GAP: the quiet stretch.
@@ -32,6 +32,51 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const nice = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}, ${d.slice(0, 4)}`;
 export const isMatch = (bank: number, app: number) => Math.abs(bank - app) < MATCH_EPS;
 
+// Entries the app has but the bank or card hadn't posted yet on `asOf`: a
+// purchase made a day or two before a statement closed that posts after it,
+// or a payment made that the card applies days later. They're recent -- in
+// the TRANSIT_DAYS up to `asOf` -- and together exactly the difference. The
+// fewest such entries, or null.
+export const TRANSIT_DAYS = 5;
+const MAX_TRANSIT_ITEMS = 16; // beyond this, only singles and pairs are tried
+
+export function inTransit(input: { diff: number; items: CheckItem[]; asOf: string }): CheckItem[] | null {
+  const target = -cents(input.diff);
+  if (target === 0) return null;
+  const recent = input.items
+    .filter((i) => i.date <= input.asOf && days(i.date, input.asOf) < TRANSIT_DAYS)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  if (!recent.length) return null;
+  let best: CheckItem[] | null = null;
+  const consider = (set: CheckItem[]) => {
+    if (set.reduce((n, i) => n + cents(i.amount), 0) === target && (!best || set.length < best.length)) best = set;
+  };
+  if (recent.length <= MAX_TRANSIT_ITEMS) {
+    for (let mask = 1; mask < 1 << recent.length; mask++) {
+      const set = recent.filter((_, k) => mask & (1 << k));
+      if (best && set.length >= (best as CheckItem[]).length) continue;
+      consider(set);
+    }
+  } else {
+    for (let a = 0; a < recent.length; a++) {
+      consider([recent[a]]);
+      for (let b = a + 1; b < recent.length; b++) consider([recent[a], recent[b]]);
+    }
+  }
+  return best;
+}
+
+// "Matches once your $39.18 Crocs Sandals (Nov 25) purchase posts."
+export function transitText(items: CheckItem[], money: (n: number) => string, card = false): string {
+  const md = (d: string) => `${MONTHS[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8, 10))}`;
+  const one = (i: CheckItem) => {
+    const name = (i.notes?.trim() || i.label).replace(/\s+/g, " ");
+    return `${money(Math.abs(i.amount))} ${name.length > 30 ? `${name.slice(0, 29)}…` : name} (${md(i.date)})`;
+  };
+  const list = items.length <= 2 ? items.map(one).join(" and ") : `${items.slice(0, 2).map(one).join(", ")} and ${items.length - 2} more`;
+  return `Matches once ${list} ${items.length === 1 ? "posts" : "post"}${card ? " to the card" : " at the bank"}: made before that date, posted after it.`;
+}
+
 // For a credit card (`card: true`) the figures are what's owed: `diff` is
 // the card's figure minus the app's, and each item is signed by what it does
 // to the amount owed (a charge positive, a payment or refund negative). The
@@ -43,6 +88,18 @@ export function findCauses(input: { diff: number; items: CheckItem[]; since: str
   const items = input.items.filter((i) => i.date >= input.since && i.date <= input.asOf).sort((a, b) => a.date.localeCompare(b.date));
   const hints: Hint[] = [];
   const abs = Math.abs(diff);
+
+  // Made just before the date, posted after it: not a mistake at all.
+  const transit = inTransit({ diff, items, asOf: input.asOf });
+  if (transit) {
+    hints.push({
+      kind: "IN_TRANSIT",
+      text: card
+        ? "Made in the last few days before this date and posted by the card after it: nothing is wrong. They'll be on the next statement."
+        : "Made in the last few days before this date and cleared by the bank after it: nothing is wrong.",
+      items: transit,
+    });
+  }
 
   // An entry that, taken out, closes the gap exactly. With a twin nearby
   // (same amount, days apart) it's probably recorded twice.

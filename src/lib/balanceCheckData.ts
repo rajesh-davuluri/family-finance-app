@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { balanceItems, computeInstrumentBalance } from "@/lib/balanceCalculations";
-import { explainGap, isMatch, type CheckItem } from "@/lib/balanceCheck";
+import { explainGap, inTransit, isMatch, transitText, type CheckItem } from "@/lib/balanceCheck";
 import { money } from "@/lib/money";
 
 // The latest balance check on each account, re-tested now: the bank's figure
@@ -18,6 +18,8 @@ export type CheckStatus = {
   daysSince: number; // since the check was made
   // Where the difference most likely is, when there is one (explainGap).
   likely: string | null;
+  // Matched once entries made just before the date post (counted as matched).
+  inTransit: string | null;
 };
 
 type Account = { id: string; currency: string; openingBalance: unknown; openingBalanceDate: Date | null };
@@ -36,9 +38,12 @@ export async function loadCheckStatuses(accounts: Account[]): Promise<Map<string
     const diff = Math.round((bank - app) * 100) / 100;
     const asOf = c.asOfDate.toISOString().slice(0, 10);
     let likely: string | null = null;
+    let transit: string | null = null;
     if (!isMatch(bank, app)) {
       const items = (await balanceItems(a.id, a.openingBalanceDate)).filter((i) => i.date <= asOf);
-      likely = explainGap({
+      const t = inTransit({ diff, items, asOf });
+      if (t) transit = transitText(t, (n) => money(n, a.currency));
+      else likely = explainGap({
         diff,
         checkedDiff: Math.round((bank - Number(c.appBalance)) * 100) / 100,
         checkedOn: c.createdAt.toISOString().slice(0, 10),
@@ -55,10 +60,11 @@ export async function loadCheckStatuses(accounts: Account[]): Promise<Map<string
       bankBalance: bank,
       appBalance: app,
       diff,
-      matched: isMatch(bank, app),
+      matched: isMatch(bank, app) || !!transit,
       adjusted: c.adjusted,
       daysSince: Math.floor((Date.now() - c.createdAt.getTime()) / 86_400_000),
       likely,
+      inTransit: transit,
     });
   }
   return out;
