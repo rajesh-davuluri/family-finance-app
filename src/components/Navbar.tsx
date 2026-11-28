@@ -24,6 +24,7 @@ const primaryLinks = [
 const moreLinks = [
   { href: "/goals", label: "Goals" },
   { href: "/net-worth", label: "Net Worth" },
+  { href: "/dashboard#emergency-fund", label: "Emergency fund" },
   { href: "/year-ahead", label: "Year ahead" },
   { href: "/close", label: "Monthly close" },
   { href: "/lent", label: "Lent & borrowed" },
@@ -62,6 +63,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
     links: [
       { href: "/investments", label: "Investments", hint: "Stocks, funds, 401(k)" },
       { href: "/net-worth", label: "Net worth", hint: "Own minus owe" },
+      { href: "/dashboard#emergency-fund", label: "Emergency fund", hint: "Months covered, add money" },
       { href: "/remittances", label: "Money to India", hint: "Transfers, rates, what they cost" },
       { href: "/policies", label: "Policies", hint: "LIC, term, premiums" },
     ],
