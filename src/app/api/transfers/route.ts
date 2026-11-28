@@ -11,6 +11,8 @@ const createSchema = z.object({
   currency: Currency,
   date: z.string(),
   notes: z.string().optional(),
+  // Set after the "already recorded?" warning, to add it anyway.
+  allowDuplicate: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -45,13 +47,32 @@ export async function POST(req: Request) {
   if (!from || from.householdId !== user.householdId || !to || to.householdId !== user.householdId) {
     return NextResponse.json({ error: "Invalid instrument." }, { status: 400 });
   }
+  // One currency per transfer: money changing currency (to India) is a
+  // remittance, with the rupees received and the rate.
+  if (from.currency !== to.currency) {
+    return NextResponse.json(
+      { error: `${from.name} is in ${from.currency} and ${to.name} in ${to.currency}. Record money sent to India on Money to India, with what arrived.`, currencyMismatch: true },
+      { status: 400 },
+    );
+  }
+  // The same amount between the same two accounts on the same day: most
+  // likely already recorded (Mark paid, or entered on Instruments).
+  const day = new Date(`${String(data.date).slice(0, 10)}T00:00:00Z`);
+  if (!data.allowDuplicate) {
+    const same = await prisma.transfer.findFirst({
+      where: { householdId: user.householdId, fromInstrumentId: from.id, toInstrumentId: to.id, amount: data.amount, date: { gte: day, lt: new Date(day.getTime() + 86_400_000) } },
+      select: { id: true, date: true, amount: true, notes: true },
+    });
+    if (same) return NextResponse.json({ duplicate: { id: same.id, date: same.date.toISOString().slice(0, 10), amount: Number(same.amount), notes: same.notes } }, { status: 409 });
+  }
 
   const transfer = await prisma.transfer.create({
     data: {
       amount: data.amount,
       currency: data.currency,
       date: new Date(data.date),
-      notes: data.notes,
+      // A card payment says so, like "Mark paid" does.
+      notes: data.notes || (to.type === "CREDIT_CARD" ? `${to.name} payment` : undefined),
       fromInstrumentId: data.fromInstrumentId,
       toInstrumentId: data.toInstrumentId,
       householdId: user.householdId,

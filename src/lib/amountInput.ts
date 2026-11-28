@@ -34,8 +34,13 @@ export function parseAmount(s: string): number {
   return n === "" ? NaN : Number(n);
 }
 
-// Keeps the cursor at the end, where digits go in.
+// Keeps the cursor at the end, where digits go in -- unless some of the
+// amount is selected (select all, a double-click, a drag), so typing then
+// replaces it rather than adding to it.
 export function caretToEnd(e: { currentTarget: HTMLInputElement }) {
   const el = e.currentTarget;
-  requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
+  requestAnimationFrame(() => {
+    if (el.selectionStart !== el.selectionEnd) return;
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
 }
