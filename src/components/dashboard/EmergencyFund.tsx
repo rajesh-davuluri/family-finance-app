@@ -68,6 +68,13 @@ export default function EmergencyFund() {
     window.addEventListener(TRANSACTIONS_CHANGED, load);
     return () => window.removeEventListener(TRANSACTIONS_CHANGED, load);
   }, [load]);
+  // Opened from the menu (/dashboard#emergency-fund): scroll to it once it's
+  // on the page -- it loads after the rest.
+  useEffect(() => {
+    if (data && typeof window !== "undefined" && window.location.hash === "#emergency-fund") {
+      document.getElementById("emergency-fund")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [data]);
 
   async function save(body: { fundUsd?: number | null; targetMonths?: number }) {
     setBusy(true);
@@ -116,7 +123,14 @@ export default function EmergencyFund() {
     load();
   }
 
-  if (!data || data.monthsAveraged === 0) return null;
+  if (!data) return null;
+  // Months covered needs a full month of spending to measure essentials by;
+  // until then the fund still shows, with Add money.
+  const measured = data.monthsAveraged > 0;
+  const firstOfNextMonth = (() => {
+    const [y, m] = data.today.split("-").map(Number);
+    return formatDate(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`, { month: "short", day: "numeric" });
+  })();
   const covered = data.monthsCovered ?? 0;
   const scale = Math.max(data.targetMonths, 6);
   const pct = Math.min(100, (covered / scale) * 100);
@@ -126,7 +140,7 @@ export default function EmergencyFund() {
   const askAmount = data.source === "none" || editing;
 
   return (
-    <section aria-label="Emergency fund" className="rounded-xl border bg-white p-4 shadow-sm">
+    <section id="emergency-fund" aria-label="Emergency fund" className="scroll-mt-20 rounded-xl border bg-white p-4 shadow-sm">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-lg">Emergency fund</h2>
         <div className="flex rounded-lg border p-0.5 text-xs" role="tablist" aria-label="Target">
@@ -184,6 +198,26 @@ export default function EmergencyFund() {
         </form>
       ) : (
         <>
+          {!measured ? (
+            <p className="text-sm text-gray-700">
+              <span className="font-display text-2xl tabular-nums text-ink-900">{usd(data.cashUsd)}</span> set aside.{" "}
+              <span className="text-gray-500">
+                How many months of essentials it covers shows once the app has a full month of your spending to measure them by (from {firstOfNextMonth}).
+              </span>{" "}
+              {data.source === "entered" && (
+                <button
+                  onClick={() => {
+                    setAmount(String(data.cashUsd));
+                    setEditing(true);
+                  }}
+                  className="text-brand-700 underline"
+                >
+                  Correct total
+                </button>
+              )}
+            </p>
+          ) : (
+          <>
           <p className="text-sm text-gray-700">
             <span className={`font-display text-2xl tabular-nums ${tone}`}>{covered.toFixed(1)}</span> of {data.targetMonths} months of essentials covered
             <span className="text-gray-500">
@@ -213,6 +247,8 @@ export default function EmergencyFund() {
             </span>
             <span className="absolute right-0">{data.targetMonths === scale ? `${scale} mo target` : `${scale} mo`}</span>
           </div>
+          </>
+          )}
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
             <div className="rounded-lg bg-paper px-3 py-2">
               <div className="text-xs text-gray-500">Added this month</div>
@@ -230,7 +266,7 @@ export default function EmergencyFund() {
             </div>
           </div>
 
-          {done ? (
+          {!measured ? null : done ? (
             <p className="mt-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-income-600">
               At your {data.targetMonths}-month target ({usd(data.target)}). Money beyond it can work harder in investments.
             </p>
@@ -365,7 +401,7 @@ export default function EmergencyFund() {
           )}
           <p className="mt-2 text-xs text-gray-400">
             {data.source === "account" ? `From ${data.fundAccounts.join(", ")}. ` : "Starting amount plus the money added and taken out since. "}
-            Essentials averaged over the last {data.monthsAveraged} full month{data.monthsAveraged === 1 ? "" : "s"} (all spending about {usd(data.totalMonthly)}/mo).
+            {measured && <>Essentials averaged over the last {data.monthsAveraged} full month{data.monthsAveraged === 1 ? "" : "s"} (all spending about {usd(data.totalMonthly)}/mo).</>}
             {data.checkingUsd > 0 && ` Checking (${usd(data.checkingUsd)}) is for bills and isn't counted.`}
             {data.inrInIndia > 0 && ` ${money(data.inrInIndia, "INR", 0)} in India isn't counted.`}
           </p>
