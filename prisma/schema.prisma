@@ -74,6 +74,7 @@ model Household {
   loanContacts       LoanContact[]
   subscriptionMarks  SubscriptionMark[]
   emergencyFundEntries EmergencyFundEntry[]
+  medicines          Medicine[]
 }
 
 model User {
@@ -105,6 +106,7 @@ model User {
   importBatches       ImportBatch[]
   telegramLinks       TelegramLink[]
   emergencyFundEntries EmergencyFundEntry[]
+  medicineDoses       MedicineDose[]
 }
 
 model PaymentInstrument {
@@ -866,4 +868,69 @@ model EmergencyFundEntry {
   createdAt DateTime @default(now())
 
   @@index([householdId, date])
+}
+
+// Medicines at home (src/lib/medicines.ts). What's in stock is never stored
+// on the medicine itself: it's the sum of its packs' `remaining`, leaving out
+// packs past their expiry date or thrown away. `dailyDose` (in `unit`s a day)
+// turns that into "runs out on"; `lowStockAt` flags it as running low.
+model Medicine {
+  id          String    @id @default(uuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  name       String   @db.NVarChar(200)
+  strength   String?  @db.NVarChar(50) // "500 mg"
+  unit       String   @default("tablets") @db.NVarChar(30) // tablets, capsules, ml, puffs...
+  forWhom    String?  @db.NVarChar(100) // who in the family takes it
+  dailyDose  Decimal? @db.Decimal(8, 2)
+  lowStockAt Decimal? @db.Decimal(10, 2)
+  notes      String?  @db.NVarChar(1000)
+  archived   Boolean  @default(false)
+
+  stock MedicineStock[]
+  doses MedicineDose[]
+
+  createdAt DateTime @default(now())
+
+  @@index([householdId])
+}
+
+// One pack, strip or bottle bought: how much it held, how much is left, and
+// the expiry date printed on it. Doses come out of the pack that expires
+// first. `discardedOn`: thrown away (expired or spoilt), remaining is then 0.
+model MedicineStock {
+  id         String   @id @default(uuid())
+  medicineId String
+  medicine   Medicine @relation(fields: [medicineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  quantity    Decimal   @db.Decimal(10, 2)
+  remaining   Decimal   @db.Decimal(10, 2)
+  expiresOn   DateTime?
+  addedOn     DateTime
+  discardedOn DateTime?
+  note        String?   @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([medicineId])
+}
+
+// A dose taken (or any use). `draws` records which packs it came out of, as
+// JSON [{"stockId": "...", "quantity": 1}], so undoing it puts them back.
+model MedicineDose {
+  id         String   @id @default(uuid())
+  medicineId String
+  medicine   Medicine @relation(fields: [medicineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  takenOn  DateTime
+  quantity Decimal  @db.Decimal(10, 2)
+  draws    String?  @db.NVarChar(Max)
+  byUserId String?
+  byUser   User?    @relation(fields: [byUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  note     String?  @db.NVarChar(200)
+
+  createdAt DateTime @default(now())
+
+  @@index([medicineId, takenOn])
 }

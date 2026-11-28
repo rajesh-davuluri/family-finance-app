@@ -15,6 +15,8 @@ import { loadCloseOverview } from "@/lib/periodCloseData";
 import { loadPeople } from "@/lib/personalLoanData";
 import { loadSubscriptions } from "@/lib/subscriptionData";
 import { loadReturns } from "@/lib/returnsData";
+import { loadMedicines } from "@/lib/medicineData";
+import { alertText as medicineAlertText } from "@/lib/medicines";
 import { loadRecentFees } from "@/lib/feesData";
 import { FEE_ADVICE, feeAlertText, interestStreaks } from "@/lib/fees";
 import { returnText } from "@/lib/returns";
@@ -160,6 +162,16 @@ export async function GET() {
     .flatMap((s) => s.alerts.filter((a) => a.kind !== "PRICE_DOWN").map((a) => ({ s, a })))
     .sort((x, y) => ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(x.a.kind) - ["CHARGED_AFTER_CANCEL", "DOUBLE", "PRICE_UP", "NEW"].indexOf(y.a.kind))
     .map(({ s, a }) => alertText(s, a, (n) => money(n, s.currency), short));
+  // Medicines: out first, then expired, running low, expiring soon.
+  const medOrder = ["OUT", "EXPIRED", "LOW", "EXPIRING"];
+  const medRank = (f: string[]) => Math.min(...f.map((x) => (medOrder.includes(x) ? medOrder.indexOf(x) : 9)), 9);
+  const medicineAlerts = (await loadMedicines(householdId, today).catch(() => []))
+    .sort((a, b) => medRank(a.status.flags) - medRank(b.status.flags))
+    .flatMap((m) => {
+      const a = medicineAlertText(m.name, m.unit, m.status);
+      return a ? [a] : [];
+    })
+    .sort((a, b) => Number(b.urgent) - Number(a.urgent));
   const owedToYou = people
     .filter((p) => p.balanceUsd >= 1 && p.since && daysSince(p.since, today) >= REMIND_AFTER_DAYS)
     .map((p) => ({ name: p.name, amountUsd: p.balanceUsd, since: p.since!, days: daysSince(p.since!, today) }));
@@ -189,6 +201,7 @@ export async function GET() {
     subscriptionAlerts,
     returnAlerts,
     feeAlerts,
+    medicineAlerts,
   });
   return NextResponse.json({ items });
 }

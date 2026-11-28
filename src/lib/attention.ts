@@ -9,7 +9,7 @@ export type AttentionItem = { key: string; level: "high" | "medium"; rank: numbe
 
 // Money about to go short first, then bills, then the books being wrong,
 // then habits and housekeeping.
-export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, fees: 3.2, returns: 3.5, subscriptions: 5.5, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
+export const RANK = { cash: 1, cards: 2, accountsOff: 3, toClose: 4, categories: 5, fees: 3.2, returns: 3.5, subscriptions: 5.5, medicines: 5.8, owed: 6, duplicates: 7, stale: 8, checkAgain: 9 } as const;
 // How many lines the dashboard shows before "Show more".
 export const ATTENTION_SHOWN = 4;
 
@@ -93,6 +93,9 @@ export function attentionItems(input: {
   feeAlerts?: string[];
   // Returns (src/lib/returns.ts): refunds late or short, windows closing.
   returnAlerts?: string[];
+  // Medicines (src/lib/medicines.ts): expired, run out, running low or
+  // expiring soon, most pressing first. `urgent` makes the line high.
+  medicineAlerts?: { text: string; urgent: boolean }[];
   // Lent & borrowed: people who have owed you a while (src/lib/personalLoans.ts).
   owedToYou?: { name: string; amountUsd: number; since: string; days: number }[];
   // The payday planner's first dip under the cushion in the next 30 days
@@ -202,6 +205,18 @@ export function attentionItems(input: {
   if (subs.length) {
     const rest = subs.length - 1;
     items.push({ key: "subscriptions", level: "medium", rank: RANK.subscriptions, text: `${subs[0]}${rest ? ` · ${rest} more subscription change${rest === 1 ? "" : "s"}` : ""}`, href: "/subscriptions" });
+  }
+
+  const meds = input.medicineAlerts ?? [];
+  if (meds.length) {
+    const rest = meds.length - 1;
+    items.push({
+      key: "medicines",
+      level: meds.some((m) => m.urgent) ? "high" : "medium",
+      rank: RANK.medicines,
+      text: `${meds[0].text}${rest ? ` · ${rest} more medicine${rest === 1 ? "" : "s"} to check` : ""}`,
+      href: "/medicines",
+    });
   }
 
   const owing = [...(input.owedToYou ?? [])].sort((a, b) => b.days - a.days);

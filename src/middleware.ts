@@ -22,5 +22,6 @@ export const config = {
     "/investments/:path*",
     "/cards/:path*",
     "/remittances/:path*",
+    "/medicines/:path*",
   ],
 };

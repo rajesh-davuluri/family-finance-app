@@ -37,6 +37,7 @@ const moreLinks = [
   { href: "/instruments", label: "Instruments" },
   { href: "/categories", label: "Categories" },
   { href: "/import", label: "Import" },
+  { href: "/medicines", label: "Medicines" },
   { href: "/household", label: "Household" },
   { href: "/settings", label: "Settings" },
 ];
@@ -81,6 +82,7 @@ const sheetGroups: { title: string; links: { href: string; label: string; hint: 
   {
     title: "Household",
     links: [
+      { href: "/medicines", label: "Medicines", hint: "Stock, expiry dates, doses taken" },
       { href: "/household", label: "Household", hint: "Members and invites" },
       { href: "/settings", label: "Settings", hint: "Security, Telegram" },
     ],
