@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { calendarDateInZone } from "@/lib/appTimezone";
 import { balanceItems, computeInstrumentBalance } from "@/lib/balanceCalculations";
-import { findCauses, isMatch } from "@/lib/balanceCheck";
+import { findCauses, inTransit, isMatch, transitText } from "@/lib/balanceCheck";
+import { money } from "@/lib/money";
 
 // Check an account against the bank: the balance the bank shows as of a
 // date, against what the app works out for that date. Every check is kept.
@@ -52,6 +53,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   await prisma.balanceCheck.create({ data: { instrumentId: id, asOfDate: asOf, bankBalance, appBalance } });
-  const hints = matched ? [] : findCauses({ diff, items: await balanceItems(id, instrument.openingBalanceDate), since, asOf: asOfDate });
+  const items = matched ? [] : await balanceItems(id, instrument.openingBalanceDate);
+  // Entries made just before the date that the bank cleared after it: a match.
+  const transit = matched ? null : inTransit({ diff, items: items.filter((i) => i.date >= since), asOf: asOfDate });
+  if (transit) return NextResponse.json({ asOfDate, bankBalance, appBalance, diff, matched: true, adjusted: false, hints: [], inTransit: transitText(transit, (n) => money(n, instrument.currency)) });
+  const hints = matched ? [] : findCauses({ diff, items, since, asOf: asOfDate });
   return NextResponse.json({ asOfDate, bankBalance, appBalance, diff, matched, adjusted: false, hints });
 }

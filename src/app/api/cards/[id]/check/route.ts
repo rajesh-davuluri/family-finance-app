@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { calendarDateInZone } from "@/lib/appTimezone";
-import { findCauses, isMatch } from "@/lib/balanceCheck";
+import { findCauses, inTransit, isMatch, transitText } from "@/lib/balanceCheck";
+import { money } from "@/lib/money";
 import { cardCheckItems, cardCheckSince, cardsOwedOn } from "@/lib/cardCheckData";
 
 // Check a credit card against the card's own balance: what the card's app or
@@ -36,6 +37,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const matched = isMatch(owed, appOwed);
   await prisma.balanceCheck.create({ data: { instrumentId: id, asOfDate: new Date(`${asOfDate}T00:00:00Z`), bankBalance: owed, appBalance: appOwed } });
   const since = cardCheckSince(asOfDate);
-  const hints = matched ? [] : findCauses({ diff, items: await cardCheckItems(id, card.currency, since, asOfDate), since, asOf: asOfDate, card: true });
+  const items = matched ? [] : await cardCheckItems(id, card.currency, since, asOfDate);
+  // Purchases or payments made just before the date that the card posted
+  // after it: a match.
+  const transit = matched ? null : inTransit({ diff, items, asOf: asOfDate });
+  if (transit) return NextResponse.json({ asOfDate, bankBalance: owed, appBalance: appOwed, diff, matched: true, adjusted: false, hints: [], inTransit: transitText(transit, (n) => money(n, card.currency), true) });
+  const hints = matched ? [] : findCauses({ diff, items, since, asOf: asOfDate, card: true });
   return NextResponse.json({ asOfDate, bankBalance: owed, appBalance: appOwed, diff, matched, adjusted: false, hints });
 }

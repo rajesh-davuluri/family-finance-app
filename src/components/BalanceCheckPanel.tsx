@@ -11,8 +11,8 @@ import type { Hint } from "@/lib/balanceCheck";
 // When it doesn't, the likely reasons are listed; fix one and check again,
 // or take the bank's figure as the new starting point.
 
-export type LastCheck = { asOfDate: string; checkedAt: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; daysSince: number; likely?: string | null };
-type Result = { asOfDate: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; hints: Hint[] };
+export type LastCheck = { asOfDate: string; checkedAt: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; daysSince: number; likely?: string | null; inTransit?: string | null };
+type Result = { asOfDate: string; bankBalance: number; appBalance: number; diff: number; matched: boolean; adjusted: boolean; hints: Hint[]; inTransit?: string };
 
 const day = (d: string) => formatDate(d, { month: "short", day: "numeric", year: "numeric" });
 
@@ -40,6 +40,7 @@ export function CheckBadge({ check, currency, card = false, onFindWhy }: { check
   return (
     <span className="text-xs text-income-600">
       ✓ {check.adjusted ? "set to" : "matches"} the {card ? "card" : "bank"} for {day(check.asOfDate)}
+      {check.inTransit && <span className="block text-gray-500">{check.inTransit}</span>}
       <span className="text-gray-400"> · checked {check.daysSince === 0 ? "today" : check.daysSince === 1 ? "yesterday" : `${check.daysSince} days ago`}</span>
     </span>
   );
@@ -121,7 +122,9 @@ export default function BalanceCheckPanel({
       {result?.matched && (
         <p className="rounded-lg bg-green-50 px-3 py-2 text-income-600">
           ✓{" "}
-          {result.adjusted
+          {result.inTransit
+            ? `${result.inTransit} The app counts them already; the ${card ? "card" : "bank"} will too.`
+            : result.adjusted
             ? `Set to the bank's figure. ${name} now builds on ${money(result.bankBalance, currency)} from the day after ${day(result.asOfDate)}.`
             : card
               ? `Matches. The app and the card both say ${money(result.bankBalance, currency)} owed as of ${day(result.asOfDate)}.`

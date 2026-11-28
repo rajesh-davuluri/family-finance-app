@@ -6,9 +6,14 @@
 // The anchor is a statement: one typed in from the paper statement (exact),
 // or, for a cycle that has closed since, the last typed-in balance rolled
 // forward through the cycle's payments and charges (exact if every
-// transaction is in the app). With no statement typed in at all, the
-// statement balance is estimated as the cycle's net charges -- i.e. assuming
-// the statement before it was paid in full -- and marked as an estimate.
+// transaction is in the app). With no statement typed in, statements roll
+// forward from the card's starting balance when it's set (so a payment more
+// or less than the bill carries over); without one, the statement balance is
+// estimated as the cycle's net charges -- i.e. assuming the statement before
+// it was paid in full -- and marked as an estimate. Entries made just before
+// a typed-in statement closed but posted after it count in the next cycle,
+// as they do on the card.
+import { inTransit } from "@/lib/balanceCheck";
 
 export type ActivityKind = "CHARGE" | "CREDIT" | "PAYMENT";
 export type CardActivity = {
@@ -27,6 +32,10 @@ export type CardInput = {
   statements: RecordedStatement[];
   activity: CardActivity[];
   today: string;
+  // The card's starting balance (owed on that date), when set: with no
+  // statement typed in since, statements are rolled forward from it, so a
+  // payment more or less than the bill carries over as it does on the card.
+  opening?: { date: string; balance: number } | null;
 };
 
 export type CycleSummary = {
@@ -160,11 +169,43 @@ function sums(activity: CardActivity[], after: string, upTo: string | null) {
 
 export function cardSnapshot(input: CardInput): CardSnapshot {
   const { today, creditLimit } = input;
-  const { activity, dropped } = dedupePayments(input.activity);
+  const deduped = dedupePayments(input.activity);
+  const dropped = deduped.dropped;
+  let activity = deduped.activity;
   const recorded = [...input.statements].filter((s) => s.closingDate <= today).sort((a, b) => (a.closingDate < b.closingDate ? 1 : -1));
   const latestRecorded = recorded[0] ?? null;
   // The closing day: as set, else read off the latest typed-in statement.
   const statementDay = input.statementDay ?? (latestRecorded ? parts(latestRecorded.closingDate).day : null);
+
+  // Entries made just before the latest typed-in statement closed but posted
+  // by the card after it (src/lib/balanceCheck.ts inTransit) are on the next
+  // statement, not that one: count them the day after it closed.
+  if (latestRecorded) {
+    const prevRecorded = recorded[1] ?? null;
+    const prev =
+      input.opening && input.opening.date < latestRecorded.closingDate && (!prevRecorded || input.opening.date > prevRecorded.closingDate)
+        ? input.opening
+        : prevRecorded
+          ? { date: prevRecorded.closingDate, balance: prevRecorded.balance }
+          : null;
+    if (prev) {
+      const f = sums(activity, prev.date, latestRecorded.closingDate);
+      const diff = r2(latestRecorded.balance - (prev.balance - f.payments - f.credits + f.charges));
+      const inCycle = activity.filter((a) => a.date > prev.date && a.date <= latestRecorded.closingDate);
+      const t = Math.abs(diff) >= EPS
+        ? inTransit({
+            diff,
+            items: inCycle.map((a, k) => ({ id: String(k), kind: "TRANSACTION" as const, date: a.date, label: a.label, notes: null, amount: a.kind === "CHARGE" ? a.amount : -a.amount })),
+            asOf: latestRecorded.closingDate,
+          })
+        : null;
+      if (t) {
+        const moved = new Set(t.map((x) => inCycle[Number(x.id)]));
+        const after = addDays(latestRecorded.closingDate, 1);
+        activity = activity.map((a) => (moved.has(a) ? { ...a, date: after } : a));
+      }
+    }
+  }
 
   const empty: CardSnapshot = {
     hasCycle: false,
@@ -205,7 +246,14 @@ export function cardSnapshot(input: CardInput): CardSnapshot {
     if (s.dueDate) due = { date: s.dueDate, approx: false };
     return finish(s.closingDate);
   }
-  if (latestRecorded) {
+  // Roll forward from the later of the latest typed-in statement and the
+  // starting balance.
+  const opening = input.opening && input.opening.date <= close && (!latestRecorded || input.opening.date > latestRecorded.closingDate) ? input.opening : null;
+  if (opening) {
+    const f = sums(activity, opening.date, close);
+    balance = r2(opening.balance - f.payments - f.credits + f.charges);
+    basis = "ROLLED_FORWARD";
+  } else if (latestRecorded) {
     const f = sums(activity, latestRecorded.closingDate, close);
     balance = r2(latestRecorded.balance - f.payments - f.credits + f.charges);
     basis = "ROLLED_FORWARD";

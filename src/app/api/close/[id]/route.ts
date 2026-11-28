@@ -6,7 +6,7 @@ import { calendarDateInZone } from "@/lib/appTimezone";
 import { isMatch } from "@/lib/balanceCheck";
 import { addDays } from "@/lib/cards";
 import { adjustmentFor, withinTolerance } from "@/lib/periodClose";
-import { adjustmentCategoryId, appFigureOn, closeCauses, diffUsd, kindOfAccount, toleranceUsd, unavailableReason } from "@/lib/periodCloseData";
+import { adjustmentCategoryId, appFigureOn, closeCauses, closeTransit, diffUsd, kindOfAccount, toleranceUsd, unavailableReason } from "@/lib/periodCloseData";
 import { cardsOwedOn } from "@/lib/cardCheckData";
 
 // Close an account through a date. The bank's balance (or what the card
@@ -71,6 +71,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (matched) {
     await prisma.periodClose.create({ data: { instrumentId: id, periodEnd: asOf, statementFigure: figure, appFigure: app, note: note || null, ...closer } });
     return NextResponse.json({ ...base, status: "CLOSED", adjustment: 0 });
+  }
+
+  // Only entries made just before the date that posted after it: closed as
+  // matched, the gap noted, no adjustment -- they'll post.
+  const transit = await closeTransit(inst, asOfDate, diff, latestEnd ? addDays(latestEnd, 1) : null);
+  if (transit) {
+    await prisma.periodClose.create({
+      data: { instrumentId: id, periodEnd: asOf, statementFigure: figure, appFigure: app, adjustment: diff, note: [note, transit].filter(Boolean).join(" · "), ...closer },
+    });
+    return NextResponse.json({ ...base, status: "CLOSED", adjustment: 0, inTransit: transit });
   }
 
   if (!accept) {

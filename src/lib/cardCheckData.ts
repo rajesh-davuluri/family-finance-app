@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { kindOf } from "@/lib/categoryKind";
 import { loadCards } from "@/lib/cardData";
 import { addDays, classifyCardTransaction, dedupePayments, type CardActivity } from "@/lib/cards";
-import { explainGap, isMatch, type CheckItem } from "@/lib/balanceCheck";
+import { explainGap, inTransit, isMatch, transitText, type CheckItem } from "@/lib/balanceCheck";
 import { money } from "@/lib/money";
 import { addedAfter, type CheckStatus } from "@/lib/balanceCheckData";
 
@@ -81,10 +81,13 @@ export async function loadCardCheckStatuses(householdId: string): Promise<Map<st
     const bank = Number(c.bankBalance);
     const diff = Math.round((bank - app) * 100) / 100;
     let likely: string | null = null;
+    let transit: string | null = null;
     if (!isMatch(bank, app)) {
       const since = cardCheckSince(d);
       const items = await cardCheckItems(id, c.instrument.currency, since, d);
-      likely = explainGap({
+      const t = inTransit({ diff, items, asOf: d });
+      if (t) transit = transitText(t, (n) => money(n, c.instrument.currency), true);
+      else likely = explainGap({
         diff,
         checkedDiff: Math.round((bank - Number(c.appBalance)) * 100) / 100,
         checkedOn: c.createdAt.toISOString().slice(0, 10),
@@ -102,10 +105,11 @@ export async function loadCardCheckStatuses(householdId: string): Promise<Map<st
       bankBalance: bank,
       appBalance: app,
       diff,
-      matched: isMatch(bank, app),
+      matched: isMatch(bank, app) || !!transit,
       adjusted: false,
       daysSince: Math.floor((Date.now() - c.createdAt.getTime()) / 86_400_000),
       likely,
+      inTransit: transit,
     });
   }
   return out;

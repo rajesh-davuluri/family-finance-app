@@ -10,6 +10,9 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 
 export type LoadedCard = Awaited<ReturnType<typeof loadCards>>[number];
 
+// How far back a starting balance is used to roll statements forward.
+const OPENING_LOOKBACK_DAYS = 400;
+
 export async function loadCards(householdId: string, today: string) {
   const cards = await prisma.paymentInstrument.findMany({
     where: { householdId, type: "CREDIT_CARD", archived: false },
@@ -24,6 +27,11 @@ export async function loadCards(householdId: string, today: string) {
       const latest = card.cardStatements.find((s) => day(s.closingDate) <= today);
       let from = addDays(today, -230);
       if (latest && day(latest.closingDate) < from) from = day(latest.closingDate);
+      // Back to the starting balance too (within a year or so), so the
+      // statements can be rolled forward from it.
+      const openingDate = card.openingBalance !== null && card.openingBalanceDate ? day(card.openingBalanceDate) : null;
+      const useOpening = !!openingDate && openingDate >= addDays(today, -OPENING_LOOKBACK_DAYS);
+      if (useOpening && openingDate! < from) from = openingDate!;
       const since = new Date(`${from}T00:00:00Z`);
 
       const [txns, transfersIn, transfersOut] = await Promise.all([
@@ -82,6 +90,7 @@ export async function loadCards(householdId: string, today: string) {
           dueDate: s.dueDate ? day(s.dueDate) : null,
         })),
         activity,
+        opening: useOpening ? { date: openingDate!, balance: Number(card.openingBalance) } : null,
       });
 
       return {
